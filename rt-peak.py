@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#created by Ross Markello (rmarkello)
 
 import numpy as np
 import scipy.signal
