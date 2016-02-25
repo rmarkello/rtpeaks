@@ -207,9 +207,9 @@ class MP150:
             Returns the most recent sample provided by the MP150.
         
         returns:
-            desc:The latest MP150 output values for three channels
+            desc:The latest MP150 output values for channels
                 (as a list of floats).
-            type:list
+            type:numpy.array
         """
         
         return self._newestsample
