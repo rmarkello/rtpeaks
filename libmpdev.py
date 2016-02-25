@@ -52,7 +52,7 @@ class MP150:
         Class to communicate with BioPax MP150 Squeezies.
     """
     
-    def __init__(self, logfile='default', samplerate=200):
+    def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
         """
         desc:
             Finds an MP150, and initializes a connection.
@@ -66,6 +66,9 @@ class MP150:
             samplerate:
                 desc:The sampling rate in Hertz (default = 200).
                 type:int
+            channels:
+                desc:Which channels to record from (default = 1, 2, 3)
+                type:list
         """
         
         # settings
@@ -73,15 +76,14 @@ class MP150:
         self._sampletime = 1000.0 / self._samplerate
         self._sampletimesec = self._sampletime / 1000.0
         self._logfilename = "%s_MP150_data.csv" % (logfile)
-        self._newestsample = (0.0, 0.0, 0.0)
+        self._newestsample = np.zeros(len(channels))
         self._buffer = []
         self._buffch = 0
 
         # connect to the MP150
         # (101 is the code for the MP150, 103 for the MP36R)
         # (11 is a code for the communication method)
-        # ('auto' is for automatically connecting to the first responding
-        # device)
+        # ('auto' is for automatically connecting to the first responding device)
         try:
             result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
         except:
@@ -102,9 +104,11 @@ class MP150:
         
         # set Channels to acquire
         try:
-            channels = [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            channels = (c_int * len(channels))(*channels)
-            result = mpdev.setAcqChannels(byref(channels))
+            chnls = np.zeros(12,dtype='int64')
+            chnls[np.array(channels) - 1] = 1
+            self._channels = chnls
+            chnls = (c_int * len(chnls))(*chnls)
+            result = mpdev.setAcqChannels(byref(chnls))
         except:
             result = "failed to call setAcqChannels"
         if check_returncode(result) != "MPSUCCESS":
@@ -117,11 +121,14 @@ class MP150:
             result = "failed to call startAcquisition"
         if check_returncode(result) != "MPSUCCESS":
             raise Exception("Error in libmpdev: failed to start acquisition: %s" % result)
-        
+       
         # open log file
         self._logfile = open(self._logfilename, 'w')
+        
         # write header
-        header = ",".join(["timestamp","channel_1","channel_2","channel_3"])
+        header = "timestamp"
+        for x in range(len(channels)):
+            header = ",".join([header,'channel_'+str(channels[x])])
         self._logfile.write(header + "\n")
         
         # create logging lock
@@ -163,7 +170,7 @@ class MP150:
         self._loglock.release()
     
     
-    def start_recording_to_buffer(self, channel=0):
+    def start_recording_to_buffer(self, channel=1):
         """
         desc:
             Starts recording to an internal buffer.
@@ -192,7 +199,7 @@ class MP150:
         
         # signal to the sample processing thread that recording stopped
         self._recordtobuff = False
-
+    
     
     def sample(self):
         """
@@ -207,14 +214,14 @@ class MP150:
         
         return self._newestsample
 
-    
+
     def get_buffer(self):
         """
         desc:
             Returns the internal sample buffer, which is filled up when
             start_recording_to_buffer is called. This function is
             safest to call only after stop_recording_to_buffer is called
-        
+            
         returns:
             desc:    A NumPy array containing samples from since
                 start_recording_to_buffer was last called, until
@@ -245,7 +252,7 @@ class MP150:
         # release the logging lock
         self._loglock.release()
 
-    
+
     def close(self):
         """
         desc:
@@ -268,7 +275,7 @@ class MP150:
         if check_returncode(result) != "MPSUCCESS":
             raise Exception("Error in libmpdev: failed to close the connection to the MP150: %s" % result)
 
-    
+
     def get_timestamp(self):
         """
         desc:
@@ -286,20 +293,20 @@ class MP150:
         """
         desc:
             Processes samples while self._recording is True (INTERNAL USE!)
-        """
-        
+            """
+            
         # run until the connection is closed
         while self._connected:
             # get new sample
             try:
-                data = [0.0, 0.0, 0.0]
+                data = np.zeros(12)
                 data = (c_double * len(data))(*data)
                 result = mpdev.getMostRecentSample(byref(data))
-                data = tuple(data)
+                data = np.array(tuple(data))[self._channels == 1]
             except:
                 result = "failed to call getMPBuffer"
-            if check_returncode(result) != "MPSUCCESS":
-                raise Exception("Error in libmpdev: failed to obtain a sample from the MP150: %s" % result)
+                if check_returncode(result) != "MPSUCCESS":
+                    raise Exception("Error in libmpdev: failed to obtain a sample from the MP150: %s" % result)
             # update newest sample
             if data != self._newestsample:
                 self._newestsample = copy.deepcopy(data)
@@ -308,9 +315,11 @@ class MP150:
                 # wait for the logging lock to be released, then lock it
                 self._loglock.acquire(True)
                 # log data
-                self._logfile.write("%d,%.3f,%.3f,%.3f\n" % (self.get_timestamp(), self._newestsample[0], self._newestsample[1], self._newestsample[2]))
+                self._logfile.write("%d," % self.get_timestamp())
+                self._newestsample.tofile(self._logfile,sep=',',format='%.3f')
+                self._logfile.write("\n")
                 # release the logging lock
                 self._loglock.release()
             # add sample to buffer
             if self._recordtobuff:
-                self._buffer.append(self._newestsample[self._buffch])
+                self._buffer.append(self._newestsample[self._buffch-1])
