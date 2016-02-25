@@ -73,10 +73,10 @@ class RTP:
         self._mp.start_recording_to_buffer()
         
         
-        
-        if self._ouput:
-            keypress.PressKey(0x50)
-            keypress.ReleaseKey(0x50)
+        if peakind:
+            self._detected.append(peakind)
             
-        self._detected.append(peakind)
-
+            if self._output:
+                keypress.PressKey(0x50)
+                keypress.ReleaseKey(0x50)
+        
