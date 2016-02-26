@@ -4,7 +4,7 @@ import os
 import time
 import numpy as np
 import scipy.signal
-import libmpdev
+from libmpdev import MP150
 import keypress
 from threading import Thread, Lock
 
@@ -20,9 +20,9 @@ from threading import Thread, Lock
 class RTP:
     """Detects physiological 'peaks' in real time from a BioPac MP150 device"""
     
-    def __init__(self, mp=libmpdev.MP150(), physio='resp'):
+    def __init__(self, mp, physio='resp'):
         """Initalizes peak detection thread
-        
+         
         mp:     instance of MP150, needed for sampling BioPac
         physio: string, one of ['resp','ecg','ppg']
         """
@@ -45,10 +45,13 @@ class RTP:
         self._recchan = np.where(self._mp._channels)[0]
         if self._recchan.size > 1: self._recchan = self._recchan[0]
         
-        self._ready = False
+        self._ready = True
         self._base = []
+        self._last = np.empty(0)
+        self._sig = np.empty(0)
         self._output = False
         self._detected = []
+        self._peakind = np.empty(0)
         
         self._rtpthread = Thread(target=self._findpeaks)
         self._rtpthread.daemon = True
@@ -56,10 +59,9 @@ class RTP:
         
         # create baseline measurement
         self._mp.start_recording()
-        self._baseline()
         
         # start peakfinder program in background
-        self._mp.start_recording_to_buffer(self._recchan)
+        self._mp.start_recording_to_buffer()
         self._rtpthread.start()
     
     
@@ -73,6 +75,7 @@ class RTP:
         """Stops sending signals to stdout"""
         
         self._output = False
+        self._ready = False
         self._mp.stop_recording_to_buffer()
         self._mp.stop_recording()
         self._mp.close()
@@ -97,15 +100,40 @@ class RTP:
     
     
     def _findpeaks(self):
-        sig = self._mp.get_buffer()
-        peakind = scipy.signal.argrelmax(sig,order=10)[0]
+        print 'Finding peaks...'
         
-        if peakind.size != len(self._detected):
-            self._detected.append(self._mp.get_timestamp())
+        while self._ready:
+            try:
+                self._sig = self._mp.get_buffer()
+            except:
+                raise Exception("Failed to get buffer from MP150")
             
-            if self._output:
-                keypress.PressKey(0x50)
-                keypress.ReleaseKey(0x50)
-                if self.DEBUGGING: print 'peak found!'
+            if np.all(self._last == self._sig):
+                pass
+            else:
+                peakind = scipy.signal.argrelmax(np.array(self._sig),order=10)[0]
+                
+                if peakind.size > self._peakind.size:
+                    self._peakind = peakind
+                    self._detected.append((self._mp.get_timestamp(),self._mp.sample()))
+                    
+                    if self._output:
+                        #keypress.PressKey(0x50)
+                        #keypress.ReleaseKey(0x50)
+                        if self.DEBUGGING: print 'Peak found!'
+            
+            self._last = self._sig
     
+
+if __name__ == '__main__':
+    mp = MP150(logfile='test',samplerate=100,channels=[1])
+    print "Successfully connected to MP150"
+    realtimedet = RTP(mp=mp)
+    realtimedet.start_peak_finding()
     
+    time.sleep(10)
+    
+    realtimedet.stop_peak_finding()
+    print "Saving detected peak file"
+    np.savetxt('test_detected.csv',np.array(realtimedet._detected),fmt='%.3f')
+    np.savetxt('test_sampled.csv',realtimedet._sig,fmt='%.3f') 

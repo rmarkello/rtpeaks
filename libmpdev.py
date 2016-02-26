@@ -308,7 +308,7 @@ class MP150:
                 if check_returncode(result) != "MPSUCCESS":
                     raise Exception("Error in libmpdev: failed to obtain a sample from the MP150: %s" % result)
             # update newest sample
-            if data != self._newestsample:
+            if not np.all(data == self._newestsample):
                 self._newestsample = copy.deepcopy(data)
             # write sample to file
             if self._recording:
