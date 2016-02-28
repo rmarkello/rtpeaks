@@ -17,23 +17,22 @@ from threading import Thread, Lock
 # Mechanics:
 # Filter recorded data for use in prediction? May cause temporal inaccuracies...
 
-class RTP:
+class RTP(MP150):
     """Detects physiological 'peaks' in real time from a BioPac MP150 device"""
     
-    def __init__(self, mp, physio='resp'):
+    def __init__(self, logfile='test', samplerate=200, channels=[1], physio='resp'):
         """Initalizes peak detection thread
          
         mp:     instance of MP150, needed for sampling BioPac
         physio: string, one of ['resp','ecg','ppg']
         """
         
+        MP150.__init__(self,logfile,samplerate,channels)
+        
         self.DEBUGGING = True
         
         if os.name == 'posix':
             raise Exception("Error in RTP: you can, unfortunately, only use this on Windows computers...")
-        
-        if not isinstance(mp,MP150):
-            raise Exception("Error in RTP: need to provide an MP150 instance.")
         
         if physio.lower() not in ['resp','ecg','ppg']:
             raise Exception("Error in RTP: physio must be one of ['resp','ecg','ppg'].")
@@ -42,8 +41,7 @@ class RTP:
         self._mp = mp
         
         # assume first "on" channel is the one to record from
-        self._recchan = np.where(self._mp._channels)[0]
-        if self._recchan.size > 1: self._recchan = self._recchan[0]
+        self._recchan = channels[0]
         
         self._ready = True
         self._base = []
