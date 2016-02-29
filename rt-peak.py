@@ -8,15 +8,6 @@ from libmpdev import MP150
 import keypress
 from threading import Thread, Lock
 
-# Overview
-# Calculate avg half peak wave (from ~preceding trough until x samples after peak)
-# Begin 'recording' real data
-# Update baseline measure (use sliding window ??)
-# If recorded data matches +/- x SDs within avg half peak wave, assume peak
-#
-# Mechanics:
-# Filter recorded data for use in prediction? May cause temporal inaccuracies...
-
 class RTP(MP150):
     """Detects physiological 'peaks' in real time from a BioPac MP150 device"""
     
@@ -31,35 +22,23 @@ class RTP(MP150):
         
         self.DEBUGGING = True
         
-        if os.name == 'posix':
-            raise Exception("Error in RTP: you can, unfortunately, only use this on Windows computers...")
-        
         if physio.lower() not in ['resp','ecg','ppg']:
             raise Exception("Error in RTP: physio must be one of ['resp','ecg','ppg'].")
         
         self._physio = physio
-        self._mp = mp
         
         # assume first "on" channel is the one to record from
         self._recchan = channels[0]
         
-        self._ready = True
-        self._base = []
-        self._last = np.empty(0)
-        self._sig = np.empty(0)
-        self._output = False
+        #set up for peak storing peak detection
         self._detected = []
         self._peakind = np.empty(0)
+        
+        self._output = False
         
         self._rtpthread = Thread(target=self._findpeaks)
         self._rtpthread.daemon = True
         self._rtpthread.name = "peakfinder"
-        
-        # create baseline measurement
-        self._mp.start_recording()
-        
-        # start peakfinder program in background
-        self._mp.start_recording_to_buffer()
         self._rtpthread.start()
     
     
@@ -72,61 +51,43 @@ class RTP(MP150):
     def stop_peak_finding(self):
         """Stops sending signals to stdout"""
         
+        #stop output
         self._output = False
-        self._ready = False
-        self._mp.stop_recording_to_buffer()
-        self._mp.stop_recording()
-        self._mp.close()
+        #stop recording
+        self.stop_recording()
+        #close connection to MP150
+        self.close()
     
     
     ## INTERNAL USE
-    def _baseline(self):
-        """Creates baseline measurement to ground initial peak detection"""
-        
-        self._mp.start_recording_to_buffer(self._recchan)
-        
-        if self._physio in ['ecg','ppg']: time.sleep(15)
-        else: time.sleep(30)
-        
-        self._mp.stop_recording_to_buffer()
-        
-        base = self._mp.get_buffer()
-        peakind = scipy.signal.argrelmax(base,order=10)[0]
-        
-        
-        self._ready = True
-    
-    
     def _findpeaks(self):
+        self.start_recording()
         print 'Finding peaks...'
+        self._last = self.sample()
         
-        while self._ready:
-            try:
-                self._sig = self._mp.get_buffer()
-            except:
-                raise Exception("Failed to get buffer from MP150")
+        while self._connected:
+            sig = self.sample()
             
-            if np.all(self._last == self._sig):
+            if sig == self._last[-1]:
                 pass
             else:
-                peakind = scipy.signal.argrelmax(np.array(self._sig),order=10)[0]
+                self._last = np.hstack((self._last,sig))
+                peakind = scipy.signal.argrelmax(np.array(self._last),order=10)[0]
                 
                 if peakind.size > self._peakind.size:
                     self._peakind = peakind
-                    self._detected.append((self._mp.get_timestamp(),self._mp.sample()))
+                    self._detected.append((self.get_timestamp(),sig))
                     
                     if self._output:
-                        #keypress.PressKey(0x50)
-                        #keypress.ReleaseKey(0x50)
-                        if self.DEBUGGING: print 'Peak found!'
+                        keypress.PressKey(0x50)
+                        keypress.ReleaseKey(0x50)
+                        
+                    if self.DEBUGGING: print 'Peak found!'
             
-            self._last = self._sig
     
-
 if __name__ == '__main__':
-    mp = MP150(logfile='test',samplerate=100,channels=[1])
-    print "Successfully connected to MP150"
-    realtimedet = RTP(mp=mp)
+    realtimedet = RTP(logfile='test')
+    print "Successfully connected to MP150."
     realtimedet.start_peak_finding()
     
     time.sleep(10)
