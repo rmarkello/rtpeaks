@@ -6,83 +6,112 @@ import numpy as np
 import scipy.signal
 from libmpdev import MP150
 import keypress
-from threading import Thread, Lock
+import multiprocessing as mp
 
 class RTP(MP150):
     """Detects physiological 'peaks' in real time from a BioPac MP150 device"""
     
-    def __init__(self, logfile='test', samplerate=200, channels=[1], physio='resp'):
-        """Initalizes peak detection thread
-         
-        mp:     instance of MP150, needed for sampling BioPac
-        physio: string, one of ['resp','ecg','ppg']
+    def __init__(self, logfile='test', samplerate=200, channels=[1], peakchan=1):
+        """
+        logfile:    string, file to which MP150 recorded data is output
+        samplerate: float, sampling rate for MP150
+        channels:   list of integers, BioPac channels from which to record data
+        peakchan:   integer, 
         """
         
-        MP150.__init__(self,logfile,samplerate,channels)
+        if type(peakchan) != int:
+            raise Exception("Can only detect peaks on one channel at a time!")
         
-        self.DEBUGGING = True
+        if peakchan[0] not in channels:
+            channels.append(peakchan[0])
+            channels.sort()
         
-        if physio.lower() not in ['resp','ecg','ppg']:
-            raise Exception("Error in RTP: physio must be one of ['resp','ecg','ppg'].")
+        MP150.__init__(self,logfile,samplerate,channels,pipe=True)        
         
-        self._physio = physio
+        self._manager = mp.Manager()
+        self._dict = self._manager.dict()
         
-        # assume first "on" channel is the one to record from
-        self._recchan = channels[0]
+        self._queue = self._manager.Queue()
         
-        #set up for peak storing peak detection
-        self._detected = []
-        self._peakind = np.empty(0)
-        
-        self._output = False
-        
-        self._rtpthread = Thread(target=self._findpeaks)
-        self._rtpthread.daemon = True
-        self._rtpthread.name = "peakfinder"
-        self._rtpthread.start()
-    
+        self._dict['DEBUGGING'] = True
+        self._dict['recchan'] = peakchan[0]
+        self._dict['logfile'] = logfile
+                
+        self._peakprocess = mp.Process(target=self._findpeaks, args=(self._dict,self._outpipe,self._queue))
+        self._peakprocess.daemon = True
+
+        self._logprocess = mp.Process(target=self._logdetected, args=(self._dict,self._queue))
+        self._logprocess.daemon = True
+            
     
     def start_peak_finding(self):
         """Starts sending signals to stdout"""
         
-        self._output = True
+        self._dict['peakdet'] = True
+        
+        if not self._recording: self.start_recording()
+
+        self._peakprocess.start()
+        self._logprocess.start()
+        
+        print 'Finding peaks...'
     
     
     def stop_peak_finding(self):
         """Stops sending signals to stdout"""
         
         #stop output
-        self._output = False
+        self._dict['peakdet'] = False
+        
+        #stop logging
+        self._queue.put('kill')
+                
         #stop recording
-        self.stop_recording()
-        #close connection to MP150
-        self.close()
+        if self._recording: self.stop_recording()
     
     
     ## INTERNAL USE
-    def _findpeaks(self):
-        self.start_recording()
-        print 'Finding peaks...'
-        self._last = self.sample()
+    def _logdetected(self, dic, queu):
+    
+        detfile = open("%s_MP150_peaks.csv" % dic['logfile'], 'w')
         
-        while self._connected:
-            sig = self.sample()
+        detfile.write("timestamp,peak_signal\n")
+
+        while True:
+            sig = queu.get()
             
-            if sig == self._last[-1]:
-                pass
-            else:
-                self._last = np.hstack((self._last,sig))
-                peakind = scipy.signal.argrelmax(np.array(self._last),order=10)[0]
+            if sig == 'kill':
+                break
                 
-                if peakind.size > self._peakind.size:
-                    self._peakind = peakind
-                    self._detected.append((self.get_timestamp(),sig))
+            detfile.write('%s\n' % str(sig).strip('()'))
+            detfile.flush()
+        
+        detfile.close()
+        
+    def _findpeaks(self, dic, pip, queu):
+        # instantiate variables for holding data
+        peakind_log = np.empty(0)
+        sig_log = np.empty(1)
+        
+        # run until told not to run
+        while dic['peakdet']:
+            try:
+                sig = pip.recv()
+            except EOFError:
+                raise Exception("RTP Error: pipe was closed from the other side")
+            
+            if sig[1] != sig_log[-1]:
+                sig_log = np.hstack((sig_log,sig[1]))
+                peakind = scipy.signal.argrelmax(sig_log,order=10)[0]
+                
+                if peakind.size > peakind_log.size:
+                    peakind_log = peakind
+                    queu.put((sig[0:2]))
                     
-                    if self._output:
-                        keypress.PressKey(0x50)
-                        keypress.ReleaseKey(0x50)
+                    #keypress.PressKey(0x50)
+                    #keypress.ReleaseKey(0x50)
                         
-                    if self.DEBUGGING: print 'Peak found!'
+                    if dic['DEBUGGING']: print 'Peak found!'
             
     
 if __name__ == '__main__':
@@ -93,6 +122,3 @@ if __name__ == '__main__':
     time.sleep(10)
     
     realtimedet.stop_peak_finding()
-    print "Saving detected peak file"
-    np.savetxt('test_detected.csv',np.array(realtimedet._detected),fmt='%.3f')
-    np.savetxt('test_sampled.csv',realtimedet._sig,fmt='%.3f') 

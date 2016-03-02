@@ -7,6 +7,7 @@ import copy
 import time
 import numpy as np
 from threading import Thread, Lock
+import multiprocessing as mp
 
 if os.name != 'posix':
     from ctypes import windll, c_int, c_double, byref
@@ -52,7 +53,7 @@ class MP150:
         Class to communicate with BioPax MP150 Squeezies.
     """
     
-    def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
+    def __init__(self, logfile='default', samplerate=200, channels=[1,2,3], pipe=False):
         """
         desc:
             Finds an MP150, and initializes a connection.
@@ -77,6 +78,7 @@ class MP150:
         self._sampletimesec = self._sampletime / 1000.0
         self._logfilename = "%s_MP150_data.csv" % (logfile)
         self._newestsample = np.zeros(len(channels))
+        self._newesttime = np.zeros(1)
         self._buffer = []
         self._buffch = 0
 
@@ -138,6 +140,10 @@ class MP150:
         self._recording = False
         self._recordtobuff = False
         self._connected = True
+        
+        if pipe: self._outpipe, self._inpipe = mp.Pipe(False)
+        else: self._outpipe, self._inpipe = None, None
+        
         self._spthread = Thread(target=self._sampleprocesser)
         self._spthread.daemon = True
         self._spthread.name = "sampleprocesser"
@@ -310,12 +316,13 @@ class MP150:
             # update newest sample
             if not np.all(data == self._newestsample):
                 self._newestsample = copy.deepcopy(data)
+                self._newesttime = self.get_timestamp()
             # write sample to file
             if self._recording:
                 # wait for the logging lock to be released, then lock it
                 self._loglock.acquire(True)
                 # log data
-                self._logfile.write("%d," % self.get_timestamp())
+                self._logfile.write("%d," % self._newesttime)
                 self._newestsample.tofile(self._logfile,sep=',',format='%.3f')
                 self._logfile.write("\n")
                 # release the logging lock
@@ -323,3 +330,6 @@ class MP150:
             # add sample to buffer
             if self._recordtobuff:
                 self._buffer.append(self._newestsample[self._buffch-1])
+            # if applicable, send data to pipe
+            if self._inpipe:
+                self._inpipe.send((self._newesttime,self._newestsample))
