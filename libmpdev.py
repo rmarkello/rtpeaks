@@ -22,6 +22,7 @@ except:
     except:
         raise Exception("Error in libmpdev: could not load mpdev.dll")
 
+
 # error handling
 def check_returncode(returncode):
     """
@@ -72,15 +73,15 @@ class MP150:
                 type:list
         """
         
+        self._manager = mp.Manager()
+        self._dict = self._manager.dict()
+        self._loglock = self._manager.Lock()
+        
         # settings
         self._samplerate = samplerate
         self._sampletime = 1000.0 / self._samplerate
         self._sampletimesec = self._sampletime / 1000.0
-        self._logfilename = "%s_MP150_data.csv" % (logfile)
-        self._newestsample = np.zeros(len(channels))
-        self._newesttime = np.zeros(1)
-        self._buffer = []
-        self._buffch = 0
+        self._dict['logfilename'] = "%s_MP150_data.csv" % (logfile)
 
         # connect to the MP150
         # (101 is the code for the MP150, 103 for the MP36R)
@@ -94,7 +95,7 @@ class MP150:
             raise Exception("Error in libmpdev: failed to connect to the MP150: %s" % result)
         
         # get starting time
-        self._starting_time = time.time()
+        self._dict['start_time'] = time.time()
         
         # set sampling rate
         try:
@@ -108,7 +109,7 @@ class MP150:
         try:
             chnls = np.zeros(12,dtype='int64')
             chnls[np.array(channels) - 1] = 1
-            self._channels = chnls
+            self._dict['channels'] = chnls
             chnls = (c_int * len(chnls))(*chnls)
             result = mpdev.setAcqChannels(byref(chnls))
         except:
@@ -125,28 +126,25 @@ class MP150:
             raise Exception("Error in libmpdev: failed to start acquisition: %s" % result)
        
         # open log file
-        self._logfile = open(self._logfilename, 'w')
+        #self._logfile = open(self._logfilename, 'w')
         
         # write header
-        header = "timestamp"
-        for x in range(len(channels)):
-            header = ",".join([header,'channel_'+str(channels[x])])
-        self._logfile.write(header + "\n")
+        #header = "timestamp"
+        #for x in range(len(channels)):
+        #    header = ",".join([header,'channel_'+str(channels[x])])
+        #self._logfile.write(header + "\n")
         
         # create logging lock
-        self._loglock = Lock()
         
         # start sample processing Thread
-        self._recording = False
-        self._recordtobuff = False
-        self._connected = True
+        self._dict['recording'] = False
+        self._dict['connected'] = True
         
-        if pipe: self._outpipe, self._inpipe = mp.Pipe(False)
-        else: self._outpipe, self._inpipe = None, None
+        if pipe: self._queue = self._manager.Queue()
+        else: self._queue = None
         
-        self._spthread = Thread(target=self._sampleprocesser)
+        self._spthread = mp.Process(target=_sampleprocesser,args=(self._dict,self._queue,self._loglock))
         self._spthread.daemon = True
-        self._spthread.name = "sampleprocesser"
         self._spthread.start()
     
     
@@ -157,7 +155,7 @@ class MP150:
         """
         
         # signal to the sample processing thread that recording is active
-        self._recording = True
+        self._dict['recording'] = True
     
     
     def stop_recording(self):
@@ -167,44 +165,13 @@ class MP150:
         """
         
         # signal to the sample processing thread that recording stopped
-        self._recording = False
+        self._dict['recording'] = False
 
         # consolidate logged data
         self._loglock.acquire(True)
         self._logfile.flush() # internal buffer to RAM
         os.fsync(self._logfile.fileno()) # RAM file cache to disk
         self._loglock.release()
-    
-    
-    def start_recording_to_buffer(self, channel=1):
-        """
-        desc:
-            Starts recording to an internal buffer.
-        
-        keywords:
-            channel:
-                desc:    The channel from which needs to be recorded.
-                    (default = 0)
-                type:    int
-        """
-        
-        # clear internal buffer
-        self._buffer = []
-        self._buffch = channel
-        
-        # signal sample processing thread that recording to the internal
-        # buffer is active
-        self._recordtobuff = True
-    
-    
-    def stop_recording_to_buffer(self):
-        """
-        desc:
-            Stops recording samples to an internal buffer.
-        """
-        
-        # signal to the sample processing thread that recording stopped
-        self._recordtobuff = False
     
     
     def sample(self):
@@ -219,23 +186,6 @@ class MP150:
         """
         
         return self._newestsample
-
-
-    def get_buffer(self):
-        """
-        desc:
-            Returns the internal sample buffer, which is filled up when
-            start_recording_to_buffer is called. This function is
-            safest to call only after stop_recording_to_buffer is called
-            
-        returns:
-            desc:    A NumPy array containing samples from since
-                start_recording_to_buffer was last called, until
-                get_buffer or stop_recording_to_buffer was called
-            type:    numpy.array
-        """
-        
-        return np.array(self._buffer)
 
     
     def log(self, msg):
@@ -266,12 +216,12 @@ class MP150:
         """
         
         # stop recording
-        if self._recording:
+        if self._dict['recording']:
             self.stop_recording()
         # close log file
         self._logfile.close()
         # stop sample processing thread
-        self._connected = False
+        self._dict['connected'] = False
         
         # close connection
         try:
@@ -292,44 +242,43 @@ class MP150:
             type:int
         """
         
-        return int((time.time()-self._starting_time) * 1000)
+        return int((time.time()-self._dict['start_time']) * 1000)
     
     
-    def _sampleprocesser(self):
+def _sampleprocesser(dic,que,loc):
+    """
+    desc:
+        Processes samples while self._recording is True (INTERNAL USE!)
         """
-        desc:
-            Processes samples while self._recording is True (INTERNAL USE!)
-            """
-            
-        # run until the connection is closed
-        while self._connected:
-            # get new sample
-            try:
-                data = np.zeros(12)
-                data = (c_double * len(data))(*data)
-                result = mpdev.getMostRecentSample(byref(data))
-                data = np.array(tuple(data))[self._channels == 1]
-            except:
-                result = "failed to call getMPBuffer"
-                if check_returncode(result) != "MPSUCCESS":
-                    raise Exception("Error in libmpdev: failed to obtain a sample from the MP150: %s" % result)
-            # update newest sample
-            if not np.all(data == self._newestsample):
-                self._newestsample = copy.deepcopy(data)
-                self._newesttime = self.get_timestamp()
-            # write sample to file
-            if self._recording:
-                # wait for the logging lock to be released, then lock it
-                self._loglock.acquire(True)
-                # log data
-                self._logfile.write("%d," % self._newesttime)
-                self._newestsample.tofile(self._logfile,sep=',',format='%.3f')
-                self._logfile.write("\n")
-                # release the logging lock
-                self._loglock.release()
-            # add sample to buffer
-            if self._recordtobuff:
-                self._buffer.append(self._newestsample[self._buffch-1])
-            # if applicable, send data to pipe
-            if self._inpipe:
-                self._inpipe.send((self._newesttime,self._newestsample))
+    newestsample = np.zeros(len(dic['channels']))
+    newesttime = 0
+    
+    # run until the connection is closed
+    while dic['connected']:
+        # get new sample
+        try:
+            data = np.zeros(12)
+            data = (c_double * len(data))(*data)
+            result = mpdev.getMostRecentSample(byref(data))
+            data = np.array(tuple(data))[dic['channels'] == 1]
+        except:
+            result = "failed to call getMPBuffer"
+            if check_returncode(result) != "MPSUCCESS":
+                raise Exception("Error in libmpdev: failed to obtain a sample from the MP150: %s" % result)
+        # update newest sample
+        if not np.all(data == newestsample):
+            newestsample = copy.deepcopy(data)
+            newesttime = int((time.time()-dic['start_time']) * 1000)
+        # write sample to file
+        if dic['recording']:
+            # wait for the logging lock to be released, then lock it
+            loc.acquire(True)
+            # log data
+            self._logfile.write("%d," % self._newesttime)
+            self._newestsample.tofile(self._logfile,sep=',',format='%.3f')
+            self._logfile.write("\n")
+            # release the logging lock
+            loc.release()
+        # if applicable, send data to queue
+        if que:
+            que.put((newesttime,newestsample))
