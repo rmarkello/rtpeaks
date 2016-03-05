@@ -31,6 +31,7 @@ def check_returncode(returncode):
 
     return meaning
 
+
 class MP150(object):
 
     def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
@@ -92,12 +93,12 @@ class MP150(object):
         
         self._dict['connected'] = True
         
-        self._sample_process = mp.Process(target=_mp_sample,args=(self._dict,self._sample_queue,self._log_queue))
+        self._sample_process = mp.Process(target=_mp150_sample,args=(self._dict,self._sample_queue,self._log_queue))
         self._sample_process.daemon = True
         self._sample_process.start()
         print "Starting sample process"
         
-        self._log_process = mp.Process(target=_mp_log,args=(self._dict,self._log_queue))
+        self._log_process = mp.Process(target=_mp150_log,args=(self._dict,self._log_queue))
         self._log_process.daemon = True
         
     
@@ -149,9 +150,10 @@ class MP150(object):
     def _stop_pipe(self):
         print "Stopping queue put at: "+str(time.time()-self._dict['starttime'])
         self._dict['pipe'] = False
+        pipe_que.put('kill')
+
     
-    
-def _mp_sample(dic,pipe_que,log_que):    
+def _mp150_sample(dic,pipe_que,log_que):    
     while dic['connected']:
         try:
             data = np.zeros(12)
@@ -173,11 +175,10 @@ def _mp_sample(dic,pipe_que,log_que):
         if dic['pipe']:
             pipe_que.put((currtime,data))
     
-    pipe_que.put('kill')
     print "Data acq process done  at: "+str(time.time()-dic['starttime'])
     
 
-def _mp_log(dic,log_que):
+def _mp150_log(dic,log_que):
     f = open(dic['logname'],'a+')
     print "Logging file opened  at: "+str(time.time()-dic['starttime'])
     
@@ -191,74 +192,3 @@ def _mp_log(dic,log_que):
 
     f.close()
     print "Logging file closed at: "+str(time.time()-dic['starttime'])
-   
-         
-class Receiver(Counter):
-    
-    def __init__(self):
-        Counter.__init__(self)
-        
-        self._dict['peaklog'] = 'test_peaking.csv'
-        self._peak_queue = self._manager.Queue()
-                
-        self._rprocess = mp.Process(target=_rec_queue,args=(self._dict,self._out_queue,self._peak_queue))
-        self._rprocess.daemon = True
-        
-        self._kprocess = mp.Process(target=_log_peaks,args=(self._dict,self._peak_queue))
-        self._kprocess.daemon = True
-        
-    def start(self):
-        self._start_record()
-        self._start_put()
-        self._rprocess.start()
-        self._kprocess.start()
-
-        
-    def stop(self):
-        self._stop_put()
-        print "Sleeping for two seconds..."
-        time.sleep(2)
-        self._log("this is a test")
-        self._close()
-            
-    def log(self):
-        pass
-
-
-def _rec_queue(dic,que_in,que_log):
-    while True:
-        i = que_in.get()
-        if i == 'kill':
-            break
-        if i % 500 == 0:
-            print "Queue received: " + str(i) + " at: "+str(time.time()-dic['starttime'])
-            que_log.put([i, time.time()-dic['starttime']])
-    
-    que_log.put('kill')
-    print "Receiver queue process killed at: "+str(time.time()-dic['starttime'])
-
-
-def _log_peaks(dic,que):
-    f = open(dic['peaklog'],'w')
-    print "Peak file opened  at: "+str(time.time()-dic['starttime'])
-    
-    while True:
-        i = que.get()
-        if i == 'kill':
-            break
-        else:
-            f.write(str(i)+'\n')
-
-    f.close()
-    print "Peak file closed at: "+str(time.time()-dic['starttime'])
-           
-if __name__ == '__main__':
-    #mp.log_to_stderr(logging.DEBUG)
-    r = Receiver()
-    print "Created Receiver instance  at: "+str(r._dict['starttime'])
-    r.start()
-    time.sleep(1)
-    for f in range(500):
-        print "SAMPLING: " + str(r._sample())
-    r.stop()
-    print "Done at: "+str(time.time()-r._dict['starttime'])

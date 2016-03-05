@@ -121,9 +121,6 @@ class Receiver(Counter):
         
     def stop(self):
         self._stop_put()
-        print "Sleeping for two seconds..."
-        time.sleep(2)
-        self._log("[XXXXXXXXXXXXX,XXXXXXXXXXXXXXX,XXXXXXXXXXXXXXX]")
         self._close()
             
     def log(self):
@@ -150,8 +147,6 @@ def _rec_queue(dic,que_in,que_log):
                     print 'Queue peak found!'
     
     que_log.put('kill')
-    print "Receiver queue process killed at: "+str(time.time()-dic['starttime'])
-    print "Final peakind_log size is: "+str(peakind_log.size)
 
 
 def _log_peaks(dic,que):
