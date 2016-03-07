@@ -8,6 +8,7 @@ import multiprocessing as mp
 import logging
 import time
 from libmpdev_v2 import MP150
+import scipy.signal
 
 class RTP(MP150):
     
@@ -17,7 +18,7 @@ class RTP(MP150):
         self._dict['peaklog'] = "%s_peak_data.csv" % (logfile)
         self._peak_queue = self._manager.Queue()
                 
-        self._peak_process = mp.Process(target=_peak_finder,args=(self._dict,self._out_queue,self._peak_queue))
+        self._peak_process = mp.Process(target=_peak_finder,args=(self._dict,self._sample_queue,self._peak_queue))
         self._peak_process.daemon = True
         
         self._peak_log_process = mp.Process(target=_peak_log,args=(self._dict,self._peak_queue))
@@ -46,7 +47,7 @@ def _peak_finder(dic,que_in,que_log):
         if i == 'kill':
             break
         else:
-            if i[1] != last_bunch[-1]:
+            if not np.all(i[1] == last_bunch[-1]):
                 last_bunch = np.hstack((last_bunch,i[1]))
                 peakind = scipy.signal.argrelmax(last_bunch,order=10)[0]
                 
@@ -76,12 +77,12 @@ def _peak_log(dic,que):
     
 
 if __name__ == '__main__':
-    mp.log_to_stderr(logging.DEBUG)
-    r = RTP()
+    #mp.log_to_stderr(logging.DEBUG)
+    r = RTP(channels=[1])
     print "Created RTP instance  at: "+str(r._dict['starttime'])
     r.start()
     time.sleep(10)
-    for f in range(500):
+    for f in range(25):
         print "SAMPLING: " + str(r.sample())
     r.stop()
     print "Done at: "+str(time.time()-r._dict['starttime'])

@@ -37,7 +37,7 @@ class MP150(object):
     def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
         self._manager = mp.Manager()
         
-        self._sample_queue = self._manager.Queue(2)
+        self._sample_queue = self._manager.Queue(5)
         self._log_queue = self._manager.Queue()
         self._dict = self._manager.dict()
         
@@ -62,7 +62,7 @@ class MP150(object):
             raise Exception("Error in libmpdev: failed to connect to the MP150: %s" % result)
             
         self._dict['starttime'] = time.time()
-
+        
         # set sampling rate
         try:
             result = mpdev.setSampleRate(c_double(self._sampletime))
@@ -128,7 +128,7 @@ class MP150(object):
         
     
     def close(self):
-        if self._dict['record']: self._stop_record()
+        if self._dict['record']: self.stop_recording()
         self._dict['connected'] = False
         print "Killing counter process at: "+str(time.time()-self._dict['starttime'])
         
@@ -150,13 +150,20 @@ class MP150(object):
     def _stop_pipe(self):
         print "Stopping queue put at: "+str(time.time()-self._dict['starttime'])
         self._dict['pipe'] = False
-        pipe_que.put('kill')
+        try:
+            self._sample_queue.put('kill',timeout=0.5)
+        except:
+            i = self._sample_queue.get()
+            self._sample_queue.put('kill')
 
     
-def _mp150_sample(dic,pipe_que,log_que):    
+def _mp150_sample(dic,pipe_que,log_que):
+    currtime = 0
+    data = 0
+    
     while dic['connected']:
         try:
-            data = np.zeros(12)
+            data = [0,0,0,0,0,0,0,0,0,0,0,0]
             data = (c_double * len(data))(*data)
             result = mpdev.getMostRecentSample(byref(data))
             data = np.array(tuple(data))[dic['channels'] == 1]
@@ -173,7 +180,10 @@ def _mp150_sample(dic,pipe_que,log_que):
             log_que.put((currtime,data))
         
         if dic['pipe']:
-            pipe_que.put((currtime,data))
+            try:
+                pipe_que.put((currtime,data),timeout=0.5)
+            except:
+                pass
     
     print "Data acq process done  at: "+str(time.time()-dic['starttime'])
     
