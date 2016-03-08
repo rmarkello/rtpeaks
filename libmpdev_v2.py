@@ -13,15 +13,6 @@ if os.name != 'posix':
 else:
     raise Exception("Sorry Mac/Linux/POSIX user: you have to use Windows to work with the BioPac!")
 
-try:
-    mpdev = windll.LoadLibrary('mpdev.dll')
-except:
-    try:
-        mpdev = windll.LoadLibrary(os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll'))
-    except:
-        raise Exception("Error in libmpdev: could not load mpdev.dll")
-
-
 # error handling
 def check_returncode(returncode):
     if returncode == 1:
@@ -33,8 +24,17 @@ def check_returncode(returncode):
 
 
 class MP150(object):
-
+    
     def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
+        
+        try:
+            mpdev = windll.LoadLibrary('mpdev.dll')
+        except:
+            try:
+                mpdev = windll.LoadLibrary(os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll'))
+            except:
+                raise Exception("Error in libmpdev: could not load mpdev.dll")
+            
         self._manager = mp.Manager()
         
         self._sample_queue = self._manager.Queue(5)
@@ -73,9 +73,9 @@ class MP150(object):
         
         # set acquisition channels
         try:
-            chnls = np.zeros(12,dtype='int64')
-            chnls[np.array(channels) - 1] = 1
-            self._dict['channels'] = chnls
+            chnls = [0]*12
+            for x in channels: chnls[x-1] = 1
+            self._dict['channels'] = np.array(chnls)
             chnls = (c_int * len(chnls))(*chnls)
             result = mpdev.setAcqChannels(byref(chnls))
         except:
@@ -112,17 +112,17 @@ class MP150(object):
         print "Stopping logging process at: "+str(time.time()-self._dict['starttime'])
         self._dict['record'] = False
         self._log_queue.put('kill')
-        
+    
     
     def log(self, msg):
         self._log_queue.put((get_timestamp(),'MSG',msg))
         print "Logged message at: "+str(time.time()-self._dict['starttime'])
     
-
+    
     def sample(self):
         return self._dict['newestsample']
-        
-        
+    
+    
     def get_timestamp(self):
         return int((time.time()-self._dict['start_time']) * 1000)
         
@@ -155,18 +155,26 @@ class MP150(object):
         except:
             i = self._sample_queue.get()
             self._sample_queue.put('kill')
-
+    
     
 def _mp150_sample(dic,pipe_que,log_que):
     currtime = 0
     data = 0
     
+    try:
+        mpdev = windll.LoadLibrary('mpdev.dll')
+    except:
+        try:
+            mpdev = windll.LoadLibrary(os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll'))
+        except:
+            raise Exception("Error in libmpdev: could not load mpdev.dll")
+    
     while dic['connected']:
         try:
-            data = [0,0,0,0,0,0,0,0,0,0,0,0]
+            data = [0,0,0]
             data = (c_double * len(data))(*data)
             result = mpdev.getMostRecentSample(byref(data))
-            data = np.array(tuple(data))[dic['channels'] == 1]
+            data = tuple(data)
         except:
             result = "failed to call getMPBuffer"
             if check_returncode(result) != "MPSUCCESS":
@@ -174,20 +182,20 @@ def _mp150_sample(dic,pipe_que,log_que):
         
         if not np.all(data == dic['newestsample']):
             dic['newestsample'] = copy.deepcopy(data)
-            currtime = int((time.time()-dic['start_time']) * 1000)
+            currtime = int((time.time()-dic['starttime']) * 1000)
                             
-        if dic['record']:
-            log_que.put((currtime,data))
-        
-        if dic['pipe']:
-            try:
-                pipe_que.put((currtime,data),timeout=0.5)
-            except:
-                pass
+            if dic['record']:
+                log_que.put((currtime,data))
+            
+            if dic['pipe']:
+                try:
+                    pipe_que.put((currtime,data),timeout=0.5)
+                except:
+                    pass
     
     print "Data acq process done  at: "+str(time.time()-dic['starttime'])
     
-
+    
 def _mp150_log(dic,log_que):
     f = open(dic['logname'],'a+')
     print "Logging file opened  at: "+str(time.time()-dic['starttime'])
