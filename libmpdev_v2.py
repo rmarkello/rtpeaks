@@ -96,9 +96,6 @@ class MP150(object):
     
     
 def _mp150_sample(dic,pipe_que,log_que):
-    currtime = 0
-    data = 0
-    
     try:
         mpdev = windll.LoadLibrary('mpdev.dll')
     except:
@@ -150,6 +147,7 @@ def _mp150_sample(dic,pipe_que,log_que):
     dic['starttime'] = time.time()
     dic['connected'] = True
     print "Ready to get samples."
+    
     
     while dic['connected']:
         try:

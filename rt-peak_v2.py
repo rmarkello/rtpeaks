@@ -16,9 +16,11 @@ class RTP(MP150):
     def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
         MP150.__init__(self, logfile, samplerate, channels)
         
+        self._dict['DEBUGGING'] = True
+        
         self._dict['peaklog'] = "%s_peak_data.csv" % (logfile)
         self._peak_queue = self._manager.Queue()
-                
+        
         self._peak_process = mp.Process(target=_peak_finder,args=(self._dict,self._sample_queue,self._peak_queue))
         self._peak_process.daemon = True
         
@@ -42,6 +44,7 @@ class RTP(MP150):
 def _peak_finder(dic,que_in,que_log):
     last_bunch = np.empty(0)
     peakind_log = np.empty(0)
+    last_peak = 0
     
     print "Ready to find peaks..."
     
@@ -50,13 +53,16 @@ def _peak_finder(dic,que_in,que_log):
         if i == 'kill': break
         else:
             last_bunch = np.hstack((last_bunch,i[1]))
-            peakind = scipy.signal.argrelmax(last_bunch,order=25)[0]
+            peakind = scipy.signal.argrelmax(last_bunch,order=10)[0]
             
             if peakind.size > peakind_log.size:
-                peakind_log = peakind            
+                print i[0]-last_peak
+                peakind_log = peakind
+                last_peak = i[0]
                 que_log.put(i[0:2])
                 keypress.PressKey(0x50)
                 keypress.ReleaseKey(0x50)
+                if dic['DEBUGGING']: print "Found peak"
     
     que_log.put('kill')
 
@@ -77,8 +83,9 @@ def _peak_log(dic,que):
 
 if __name__ == '__main__':
     #mp.log_to_stderr(logging.DEBUG)
-    r = RTP(logfile='test',channels=[1,2,3])
+    name = time.ctime().split(' ')
+    r = RTP(logfile=name[3].replace(':','_'),channels=[1,2,3])
     r.start()
-    time.sleep(10)
+    time.sleep(25)
     r.stop()
     print "Done!"
