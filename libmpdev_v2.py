@@ -5,8 +5,6 @@ import time
 import copy
 import numpy as np
 import multiprocessing as mp
-import logging
-import time
 
 if os.name != 'posix':
     from ctypes import windll, c_int, c_double, byref

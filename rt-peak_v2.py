@@ -2,11 +2,8 @@
 
 import os
 import time
-import copy
 import numpy as np
 import multiprocessing as mp
-import logging
-import time
 import keypress
 from libmpdev_v2 import MP150
 import scipy.signal
@@ -77,9 +74,13 @@ def _peak_log(dic,que):
             logt, signal = i
             f.write('%s,%s\n' % (logt, str(signal).strip('()[],')))
             f.flush()
-
-    f.close()
     
+    f.close()
+
+
+def _is_it_a_peak(signal):
+    pass
+
 
 if __name__ == '__main__':
     #mp.log_to_stderr(logging.DEBUG)
