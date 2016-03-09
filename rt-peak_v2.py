@@ -7,6 +7,7 @@ import numpy as np
 import multiprocessing as mp
 import logging
 import time
+import keypress
 from libmpdev_v2 import MP150
 import scipy.signal
 
@@ -39,50 +40,45 @@ class RTP(MP150):
         
 
 def _peak_finder(dic,que_in,que_log):
-    last_bunch = np.empty(1)
+    last_bunch = np.empty(0)
     peakind_log = np.empty(0)
+    
+    print "Ready to find peaks..."
     
     while True:
         i = que_in.get()
-        if i == 'kill':
-            break
+        if i == 'kill': break
         else:
-            if not np.all(i[1] == last_bunch[-1]):
-                last_bunch = np.hstack((last_bunch,i[1]))
-                peakind = scipy.signal.argrelmax(last_bunch,order=10)[0]
-                
-                if peakind.size > peakind_log.size:
-                    peakind_log = peakind            
-                    que_log.put(i[0:2])
-                    print "Peak found!"
+            last_bunch = np.hstack((last_bunch,i[1]))
+            peakind = scipy.signal.argrelmax(last_bunch,order=25)[0]
+            
+            if peakind.size > peakind_log.size:
+                peakind_log = peakind            
+                que_log.put(i[0:2])
+                keypress.PressKey(0x50)
+                keypress.ReleaseKey(0x50)
     
     que_log.put('kill')
-    print "Receiver queue process killed at: "+str(time.time()-dic['starttime'])
 
 
 def _peak_log(dic,que):
     f = open(dic['peaklog'],'a+')
-    print "Peak file opened  at: "+str(time.time()-dic['starttime'])
     
     while True:
         i = que.get()
-        if i == 'kill':
-            break
+        if i == 'kill': break
         else:
-            f.write(str(i)+'\n')
+            logt, signal = i
+            f.write('%s,%s\n' % (logt, str(signal).strip('()[],')))
             f.flush()
 
     f.close()
-    print "Peak file closed at: "+str(time.time()-dic['starttime'])
     
 
 if __name__ == '__main__':
     #mp.log_to_stderr(logging.DEBUG)
-    r = RTP(channels=[1])
-    print "Created RTP instance  at: "+str(r._dict['starttime'])
+    r = RTP(logfile='test',channels=[1,2,3])
     r.start()
     time.sleep(10)
-    for f in range(25):
-        print "SAMPLING: " + str(r.sample())
     r.stop()
-    print "Done at: "+str(time.time()-r._dict['starttime'])
+    print "Done!"

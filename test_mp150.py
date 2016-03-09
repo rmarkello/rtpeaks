@@ -7,6 +7,8 @@ import logging
 
 def f():
     mp = MP150(channels=[1])
+    while not mp._dict['connected']:
+        pass
     mp.start_recording()
     print "Started recording"
     
@@ -46,33 +48,30 @@ def f2():
     
 ###############################################################
 
-def rec_pipe(pipe):
-    fil1 = open('test_out_pipe.csv','w')
+def rec_queue(queue):
+    fil1 = open('test_out_queue.csv','w')
     print "opened file"
-    print "attempting to read from pipe..."
+    print "attempting to read from queue..."
     for f in range(100):
-        try:
-            result = pipe.poll()
-            print "Attempt "+str(f)+": "+str(result)
-        except:
-            raise Exception("Can't poll pipe...")
-        if result:
-            i = pipe.recv()
-            print i
-            fil1.write(str(i[0])+','+str(i[1][0])+'\n')
-            fil1.flush()
+        i = queue.get()
+        print i
+        fil1.write(str(i[0])+','+str(i[1][0])+'\n')
+        fil1.flush()
     
     fil1.close()
 
 def f3():
-    mp = MP150(channels=[1])
+    mp = MP150(logfile='test',channels=[1])
     mp.start_recording()
     print "Started recording"
 
-    p = Process(target=rec_pipe,args=(mp._outpipe,))
-    p.daemon = True
+    p = Process(target=rec_queue,args=(mp._sample_queue,))
     p.start()
+    mp._start_pipe()
     print "Started pipe process"
+    while not mp._dict['pipe']:
+        pass
+    print "joining process"
     p.join()
     
     mp.stop_recording()
@@ -139,4 +138,4 @@ def f3():
 
 
 if __name__ == '__main__':
-    f()
+    f3()
