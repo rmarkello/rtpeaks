@@ -23,8 +23,8 @@ class RTP(MP150):
         
         self._peak_log_process = mp.Process(target=_peak_log,args=(self._dict,self._peak_queue))
         self._peak_log_process.daemon = True
-        
-        
+    
+    
     def start_peak_finding(self):
         self.start_recording()
         self._start_pipe()
@@ -32,15 +32,16 @@ class RTP(MP150):
         self._peak_process.start()
         self._peak_log_process.start()
     
-        
+    
     def stop_peak_finding(self):
         self._stop_pipe()
         self.close()
-        
+    
+
 
 def _peak_finder(dic,que_in,que_log):
-    last_bunch = np.empty(0)
-    peakind_log = np.empty(0)
+    sig = np.empty(0)
+    last_found = np.array((0,-1000,-10))
     
     print "Ready to find peaks..."
     
@@ -48,30 +49,40 @@ def _peak_finder(dic,que_in,que_log):
         i = que_in.get()
         if i == 'kill': break
         else:
-            last_bunch = np.hstack((last_bunch,i[1]))
+            sig = np.hstack((last_bunch,i[1]))
+            sig_size = sig.shape[0]-1
             
-            peak = _is_it_a_peak(last_bunch)
-            trough = _is_it_a_trough(last_bunch)
+            thresh1 = np.mean(last_found[last_found[sig_size-10:sig_size,0]==1,2])
+            thresh2 = np.mean(last_found[last_found[sig_size-10:sig_size,0]==0,2])
             
-            if peak or trough:
-                last_bunch = np.empty(0)
+            avg_thres = np.mean([thresh1,thres2])
+            
+            peak = _is_it_a_peak(sig,thresh1)
+            trough = _is_it_a_trough(sig,thresh2)
+            
+            if (peak or trough) and (i[0]-last_found[-1][1] > 750):
+                sig = np.empty(0)
                 
                 que_log.put(i[0:2])
                 
+                last_found = np.hstack((last_found,np.array([peak,i[0],i[1]])))
+                
                 if peak:
-                    keyPress.PressKey(0x50)
+                    keypress.PressKey(0x50)
                     keypress.ReleaseKey(0x50)
                     
                     if dic['DEBUGGING']: print "Found peak"
-                
-                if trough:
+                    
+                else:
                     keypress.PressKey(0x54)
                     keypress.ReleaseKey(0x54)
                     
                     if dic['DEBUGGING']: print "Found trough"
-            
                 
-                
+            elif (peak or trough) and (i[0]-last_found[-1][1] < 750):
+                #print "Peak/trough too close"
+                sig = np.empty(0)
+    
     que_log.put('kill')
 
 
@@ -89,16 +100,22 @@ def _peak_log(dic,que):
     f.close()
 
 
-def _is_it_a_peak(sig):
+def _is_it_a_peak(sig, thresh):
     peakind = scipy.signal.argrelmax(sig,order=10)[0]
     
-    return peakind.size
+    if peakind.size > 0 and sig[peakind[-1]] > thresh:
+        return True
+    else:
+        return False
 
 
-def _is_it_a_trough(sig):
+def _is_it_a_trough(sig, thresh):
     peakind = scipy.signal.argrelmin(sig,order=10)[0]
     
-    return peakind.size
+    if peakind.size > 0 and sig[peakind[-1]] > thresh:
+        return True
+    else:
+        return False
 
 
 if __name__ == '__main__':
