@@ -38,8 +38,8 @@ class MP150(object):
         self._dict['newestsample'] = [0]*len(channels)
         self._dict['pipe'] = False
         self._dict['record'] = False
-        self._dict['starttime'] = time.time()
         self._dict['connected'] = False
+        self._dict['starttime'] = time.time()
         self._dict['channels'] = channels
         
         self._sample_process = mp.Process(target=_mp150_sample,args=(self._dict,self._sample_queue,self._log_queue))
@@ -61,8 +61,7 @@ class MP150(object):
     
     
     def log(self, msg):
-        self._log_queue.put((get_timestamp(),'MSG',msg))
-        print "Logged message at: "+str(time.time()-self._dict['starttime'])
+        self._log_queue.put((get_timestamp(),'MSG',msg))    
     
     
     def sample(self):
@@ -94,6 +93,7 @@ class MP150(object):
     
     
 def _mp150_sample(dic,pipe_que,log_que):
+    # load required library
     try:
         mpdev = windll.LoadLibrary('mpdev.dll')
     except:
@@ -106,7 +106,6 @@ def _mp150_sample(dic,pipe_que,log_que):
     # (101 is the code for the MP150, 103 for the MP36R)
     # (11 is a code for the communication method)
     # ('auto' is for automatically connecting to the first responding device)
-        
     try:
         result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
     except:
@@ -144,9 +143,8 @@ def _mp150_sample(dic,pipe_que,log_que):
 
     dic['starttime'] = time.time()
     dic['connected'] = True
-    print "Ready to get samples."
     
-    
+    # process samples    
     while dic['connected']:
         try:
             data = [0]*12
@@ -167,7 +165,7 @@ def _mp150_sample(dic,pipe_que,log_que):
             
             if dic['pipe']:
                 try:
-                    pipe_que.put((currtime,data[0]),timeout=0.5)
+                    pipe_que.put((currtime,data[0]),timeout=dic['sampletime']/1000)
                 except:
                     pass
     
