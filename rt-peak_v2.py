@@ -41,7 +41,7 @@ class RTP(MP150):
 
 def _peak_finder(dic,que_in,que_log):
     sig = np.empty(0)
-    last_found = np.array((0,-1000,-10))
+    last_found = np.array([[0,-1000,10],[1,-1000,-10]])
     
     print "Ready to find peaks..."
     
@@ -49,23 +49,24 @@ def _peak_finder(dic,que_in,que_log):
         i = que_in.get()
         if i == 'kill': break
         else:
-            sig = np.hstack((last_bunch,i[1]))
-            sig_size = sig.shape[0]-1
+            sig = np.hstack((sig,i[1]))
+            b_size = last_found.shape[0]
             
-            thresh1 = np.mean(last_found[last_found[sig_size-10:sig_size,0]==1,2])
-            thresh2 = np.mean(last_found[last_found[sig_size-10:sig_size,0]==0,2])
+            if b_size-6 < 0: t_size = 0
+            else: t_size = b_size-6
             
-            avg_thres = np.mean([thresh1,thres2])
+            p_thresh = np.mean(last_found[last_found[t_size:b_size,0]==1,2])
+            t_thresh = np.mean(last_found[last_found[t_size:b_size,0]==0,2])
             
-            peak = _is_it_a_peak(sig,thresh1)
-            trough = _is_it_a_trough(sig,thresh2)
+            peak = _is_it_a_peak(sig,p_thresh)
+            trough = _is_it_a_trough(sig,t_thresh)
             
-            if (peak or trough) and (i[0]-last_found[-1][1] > 750):
+            if (peak or trough) and (i[0]-last_found[-1][1] > 1000):
                 sig = np.empty(0)
                 
                 que_log.put(i[0:2])
                 
-                last_found = np.hstack((last_found,np.array([peak,i[0],i[1]])))
+                last_found = np.vstack((last_found,np.array([peak,i[0],i[1]])))
                 
                 if peak:
                     keypress.PressKey(0x50)
@@ -79,8 +80,7 @@ def _peak_finder(dic,que_in,que_log):
                     
                     if dic['DEBUGGING']: print "Found trough"
                 
-            elif (peak or trough) and (i[0]-last_found[-1][1] < 750):
-                #print "Peak/trough too close"
+            elif (peak or trough) and (i[0]-last_found[-1][1] < 1000):
                 sig = np.empty(0)
     
     que_log.put('kill')
@@ -112,7 +112,7 @@ def _is_it_a_peak(sig, thresh):
 def _is_it_a_trough(sig, thresh):
     peakind = scipy.signal.argrelmin(sig,order=10)[0]
     
-    if peakind.size > 0 and sig[peakind[-1]] > thresh:
+    if peakind.size > 0 and sig[peakind[-1]] < thresh:
         return True
     else:
         return False
