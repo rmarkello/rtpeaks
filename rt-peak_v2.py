@@ -41,7 +41,10 @@ class RTP(MP150):
 
 def _peak_finder(dic,que_in,que_log):
     sig = np.empty(0)
-    last_found = np.array([[0,-1000,10],[1,-1000,-10]])
+    last_found = np.array([[0,-2000,10],[1,-2000,-10],[0,-1000,10],[1,-1000,-10]])
+    
+    P_KEY = 0x50
+    T_KEY = 0x54
     
     print "Ready to find peaks..."
     
@@ -50,35 +53,27 @@ def _peak_finder(dic,que_in,que_log):
         if i == 'kill': break
         else:
             sig = np.hstack((sig,i[1]))
+            
             b_size = last_found.shape[0]
+            t_size = 0 if (b_size-6 < 0) else b_size-6
             
-            if b_size-6 < 0: t_size = 0
-            else: t_size = b_size-6
-            
-            p_thresh = np.mean(last_found[last_found[t_size:b_size,0]==1,2])
-            t_thresh = np.mean(last_found[last_found[t_size:b_size,0]==0,2])
-            
-            peak = _is_it_a_peak(sig,p_thresh)
-            trough = _is_it_a_trough(sig,t_thresh)
+            peak_height = last_found[last_found[t_size:b_size,0]==1,2]
+            trough_height = last_found[last_found[t_size:b_size,0]==0,2]
+
+            peak = _is_it_a_peak(sig,np.mean(peak_height)-np.std(peak_height))
+            trough = _is_it_a_trough(sig,np.mean(trough_height)+np.std(trough_height))
             
             if (peak or trough) and (i[0]-last_found[-1][1] > 1000):
                 sig = np.empty(0)
-                
                 que_log.put(i[0:2])
                 
-                last_found = np.vstack((last_found,np.array([peak,i[0],i[1]])))
+                last_found = np.vstack((last_found,
+                                        np.array([peak,i[0],i[1]])))
                 
-                if peak:
-                    keypress.PressKey(0x50)
-                    keypress.ReleaseKey(0x50)
+                keypress.PressKey(P_KEY if peak else T_KEY)
+                keypress.ReleaseKey(P_KEY if peak else T_KEY)
                     
-                    if dic['DEBUGGING']: print "Found peak"
-                    
-                else:
-                    keypress.PressKey(0x54)
-                    keypress.ReleaseKey(0x54)
-                    
-                    if dic['DEBUGGING']: print "Found trough"
+                if dic['DEBUGGING']: print "Found %s" % ("peak" if peak else "trough")
                 
             elif (peak or trough) and (i[0]-last_found[-1][1] < 1000):
                 sig = np.empty(0)
@@ -121,7 +116,7 @@ def _is_it_a_trough(sig, thresh):
 if __name__ == '__main__':
     #mp.log_to_stderr(logging.DEBUG)
     name = time.ctime().split(' ')
-    r = RTP(logfile=name[3].replace(':','_'),channels=[1,2,3])
+    r = RTP(logfile=name[3].replace(':','_'),channels=[1])
     r.start_peak_finding()
     time.sleep(25)
     r.stop_peak_finding()
