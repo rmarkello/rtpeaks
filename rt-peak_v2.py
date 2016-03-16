@@ -38,10 +38,23 @@ class RTP(MP150):
         self.close()
     
 
+def _peak_log(dic,que):
+    f = open(dic['peaklog'],'a+')
+    
+    while True:
+        i = que.get()
+        if i == 'kill': break
+        else:
+            peakt, sigt, signal = i
+            f.write('%s,%s,%s\n' % (peakt, sigt, str(signal).strip('[]')))
+            f.flush()
+    
+    f.close()
+    
 
 def _peak_finder(dic,que_in,que_log):
     sig = np.empty(0)
-    last_found = np.array([[0,-2000,10],[1,-2000,-10],[0,-1000,10],[1,-1000,-10]])
+    last_found = np.array([[0,-2000,0],[1,-2000,0],[0,-1000,0],[1,-1000,0]])
     
     P_KEY = 0x50
     T_KEY = 0x54
@@ -54,18 +67,16 @@ def _peak_finder(dic,que_in,que_log):
         else:
             sig = np.hstack((sig,i[1]))
             
-            b_size = last_found.shape[0]
-            t_size = 0 if (b_size-6 < 0) else b_size-6
+            peak_height, trough_height = _gen_thresh(last_found)
+            thresh = np.mean(np.abs(peak_height-trough_height))/2
             
-            peak_height = last_found[last_found[t_size:b_size,0]==1,2]
-            trough_height = last_found[last_found[t_size:b_size,0]==0,2]
-
-            peak = _is_it_a_peak(sig,np.mean(peak_height)-np.std(peak_height))
-            trough = _is_it_a_trough(sig,np.mean(trough_height)+np.std(trough_height))
+            peak = _is_it_a_peak(sig,trough_height[-1],thresh)
+            trough = _is_it_a_trough(sig,peak_height[-1],thresh)
             
             if (peak or trough) and (i[0]-last_found[-1][1] > 1000):
                 sig = np.empty(0)
-                que_log.put(i[0:2])
+                currtime = int((time.time()-dic['starttime']) * 1000)
+                que_log.put((currtime,i[0],i[1]))
                 
                 last_found = np.vstack((last_found,
                                         np.array([peak,i[0],i[1]])))
@@ -81,36 +92,45 @@ def _peak_finder(dic,que_in,que_log):
     que_log.put('kill')
 
 
-def _peak_log(dic,que):
-    f = open(dic['peaklog'],'a+')
-    
-    while True:
-        i = que.get()
-        if i == 'kill': break
-        else:
-            logt, signal = i
-            f.write('%s,%s\n' % (logt, str(signal).strip('[]')))
-            f.flush()
-    
-    f.close()
+def _peak_or_trough(signal):
+    pass
 
 
-def _is_it_a_peak(sig, thresh):
+def _gen_thresh(last_found):
+    b_size = last_found.shape[0]
+    t_size = 0 if (b_size-6 < 0) else b_size-6
+    
+    peak_height = last_found[t_size:b_size,2][last_found[t_size:b_size,0]==1]
+    trough_height = last_found[t_size:b_size,2][last_found[t_size:b_size,0]==0]
+    
+    if peak_height.size>trough_height.size:
+        peak_height = peak_height[peak_height.size-trough_height.size:]
+    elif trough_height.size>peak_height.size:
+        trough_height = trough_height[trough_height.size-peak_height.size:]
+    
+    return peak_height, trough_height
+
+
+def _is_it_a_peak(sig, last_trough_height, thresh=0):
     peakind = scipy.signal.argrelmax(sig,order=10)[0]
     
-    if peakind.size > 0 and sig[peakind[-1]] > thresh:
-        return True
-    else:
-        return False
+    if not peakind.size: return False
+    
+    high_enough = np.abs(sig[peakind[-1]]-last_trough_height) > thresh
+    
+    if high_enough: return True
+    else: return False
 
 
-def _is_it_a_trough(sig, thresh):
+def _is_it_a_trough(sig, last_peak_height, thresh=0):
     peakind = scipy.signal.argrelmin(sig,order=10)[0]
     
-    if peakind.size > 0 and sig[peakind[-1]] < thresh:
-        return True
-    else:
-        return False
+    if not peakind.size: return False
+    
+    low_enough = np.abs(sig[peakind[-1]]-last_peak_height) > thresh
+    
+    if low_enough: return True
+    else: return False
 
 
 if __name__ == '__main__':
