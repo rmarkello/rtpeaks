@@ -40,6 +40,8 @@ class RTP(MP150):
 
 def _peak_log(dic,que):
     f = open(dic['peaklog'],'a+')
+    f.write('time_detected,time_received,amplitude\n')
+    f.flush()
     
     while True:
         i = que.get()
@@ -54,7 +56,7 @@ def _peak_log(dic,que):
 
 def _peak_finder(dic,que_in,que_log):
     sig = np.empty(0)
-    last_found = np.array([[0,-2000,0],[1,-2000,0],[0,-1000,0],[1,-1000,0]])
+    last_found = np.array([[0,-2000,0],[1,-2000,0],[0,-1000,0],[1,-1000,0],[-1,0,0]])
     
     P_KEY = 0x50
     T_KEY = 0x54
@@ -67,14 +69,11 @@ def _peak_finder(dic,que_in,que_log):
         else:
             sig = np.hstack((sig,i[1]))
             
-            peak_height, trough_height = _gen_thresh(last_found)
-            thresh = np.mean(np.abs(peak_height-trough_height))/2
+            peak, trough = _peak_or_trough(sig,last_found)
             
-            peak = _is_it_a_peak(sig,trough_height[-1],thresh)
-            trough = _is_it_a_trough(sig,peak_height[-1],thresh)
-            
-            if (peak or trough) and (i[0]-last_found[-1][1] > 1000):
+            if (peak or trough) and (i[0]-last_found[-1][1] > 800):
                 sig = np.empty(0)
+                
                 currtime = int((time.time()-dic['starttime']) * 1000)
                 que_log.put((currtime,i[0],i[1]))
                 
@@ -86,51 +85,41 @@ def _peak_finder(dic,que_in,que_log):
                     
                 if dic['DEBUGGING']: print "Found %s" % ("peak" if peak else "trough")
                 
-            elif (peak or trough) and (i[0]-last_found[-1][1] < 1000):
+            elif (peak or trough) and (i[0]-last_found[-1][1] < 800):
                 sig = np.empty(0)
     
     que_log.put('kill')
 
 
-def _peak_or_trough(signal):
-    pass
-
+def _peak_or_trough(signal, last_found):    
+    peaks = scipy.signal.argrelmax(signal,order=10)[0]
+    troughs = scipy.signal.argrelmin(signal,order=10)[0]
+        
+    peak_height, trough_height = _gen_thresh(last_found)
+    thresh = np.mean(np.abs(peak_height-trough_height))/2
+    
+    if peaks.size and (last_found[-1][0] != 1):
+        if np.abs(signal[peaks[-1]]-trough_height[-1]) > thresh:
+            return True, False
+    if troughs.size and (last_found[-1][0] != 0):
+        if np.abs(signal[troughs[-1]]-peak_height[-1]) > thresh:
+            return False, True
+    return False, False
+    
 
 def _gen_thresh(last_found):
-    b_size = last_found.shape[0]
-    t_size = 0 if (b_size-6 < 0) else b_size-6
+    peak_heights = last_found[...,2][last_found[...,0]==1]
+    trough_heights = last_found[...,2][last_found[...,0]==0]
     
-    peak_height = last_found[t_size:b_size,2][last_found[t_size:b_size,0]==1]
-    trough_height = last_found[t_size:b_size,2][last_found[t_size:b_size,0]==0]
+    peak_height = peak_heights[-3 if peak_heights.shape[0]-3 > 0 else 0:]
+    trough_height = trough_heights[-3 if trough_heights.shape[0]-3 > 0 else 0:]
     
-    if peak_height.size>trough_height.size:
+    if peak_height.size > trough_height.size:
         peak_height = peak_height[peak_height.size-trough_height.size:]
-    elif trough_height.size>peak_height.size:
+    elif trough_height.size > peak_height.size:
         trough_height = trough_height[trough_height.size-peak_height.size:]
     
     return peak_height, trough_height
-
-
-def _is_it_a_peak(sig, last_trough_height, thresh=0):
-    peakind = scipy.signal.argrelmax(sig,order=10)[0]
-    
-    if not peakind.size: return False
-    
-    high_enough = np.abs(sig[peakind[-1]]-last_trough_height) > thresh
-    
-    if high_enough: return True
-    else: return False
-
-
-def _is_it_a_trough(sig, last_peak_height, thresh=0):
-    peakind = scipy.signal.argrelmin(sig,order=10)[0]
-    
-    if not peakind.size: return False
-    
-    low_enough = np.abs(sig[peakind[-1]]-last_peak_height) > thresh
-    
-    if low_enough: return True
-    else: return False
 
 
 if __name__ == '__main__':
@@ -138,6 +127,6 @@ if __name__ == '__main__':
     name = time.ctime().split(' ')
     r = RTP(logfile=name[3].replace(':','_'),channels=[1])
     r.start_peak_finding()
-    time.sleep(25)
+    time.sleep(600)
     r.stop_peak_finding()
     print "Done!"

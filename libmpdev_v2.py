@@ -182,6 +182,10 @@ def _mp150_sample(dic,pipe_que,log_que):
     
 def _mp150_log(dic,log_que):
     f = open(dic['logname'],'a+')
+    f.write('time,')
+    for ch in np.where(dic['channels'])[0]: f.write('channel_%s,' % ch)
+    f.seek(f.tell()-1)
+    f.write('\n')
     
     while True:
         i = log_que.get()
