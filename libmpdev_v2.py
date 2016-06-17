@@ -13,111 +13,104 @@ else:
 
 # error handling
 def check_returncode(returncode):
-    if returncode == 1:
-        meaning = "MPSUCCESS"
-    else:
-        meaning = "UNKNOWN"
-
-    return meaning
+    if returncode == 1: return "MPSUCCESS"
+    else: return "UNKNOWN"
 
 
 class MP150(object):
     
     def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
             
-        self._manager = mp.Manager()
-        self._sample_queue = self._manager.Queue(5)
-        self._log_queue = self._manager.Queue()
-        self._dict = self._manager.dict()
+        self.manager = mp.Manager()
+        self.sample_queue = self.manager.Queue(5)
+        self.log_queue = self.manager.Queue()
+        self.dic = self.manager.dict()
         
-        self._samplerate = samplerate
-        self._dict['sampletime'] = 1000.0 / self._samplerate
-        self._sampletimesec = self._dict['sampletime'] / 1000.0
+        self.samplerate = samplerate
+        self.dic['sampletime'] = 1000.0 / self.samplerate
+        self._sampletimesec = self.dic['sampletime'] / 1000.0
         
-        self._dict['logname'] = "%s_MP150_data.csv" % (logfile)
-        self._dict['newestsample'] = [0]*len(channels)
-        self._dict['pipe'] = False
-        self._dict['record'] = False
-        self._dict['connected'] = False
-        self._dict['starttime'] = time.time()
-        self._dict['channels'] = channels
+        self.dic['logname'] = "%s_MP150_data.csv" % (logfile)
+        self.dic['newestsample'] = [0]*len(channels)
+        self.dic['pipe'] = False
+        self.dic['record'] = False
+        self.dic['connected'] = False
+        self.dic['starttime'] = time.time()
+        self.dic['channels'] = channels
         
-        self._sample_process = mp.Process(target=_mp150_sample,args=(self._dict,self._sample_queue,self._log_queue))
-        self._sample_process.daemon = True
-        self._sample_process.start()
+        self.sample_process = mp.Process(target=mp150_sample,
+                                            args=(self.dic,self.sample_queue,self.log_queue)) 
+        self.log_process = mp.Process(target=mp150_log,
+                                        args=(self.dic,self.log_queue))
         
-        self._log_process = mp.Process(target=_mp150_log,args=(self._dict,self._log_queue))
-        self._log_process.daemon = True
+        self.log_process.daemon = True
+        self.sample_process.daemon = True
+        self.sample_process.start()
         
     
     def start_recording(self):
-        self._dict['record'] = True
-        self._log_process.start()
+        self.dic['record'] = True
+        self.log_process.start()
     
     
     def stop_recording(self):
-        self._dict['record'] = False
-        self._log_queue.put('kill')
+        self.dic['record'] = False
+        self.log_queue.put('kill')
     
     
     def log(self, msg):
-        self._log_queue.put((get_timestamp(),'MSG',msg))    
+        self.log_queue.put((get_timestamp(),'MSG',msg))    
     
     
     def sample(self):
-        return self._dict['newestsample']
+        return self.dic['newestsample']
     
     
     def get_timestamp(self):
-        return int((time.time()-self._dict['start_time']) * 1000)
+        return int((time.time()-self.dic['start_time']) * 1000)
         
     
     def close(self):
-        self._dict['connected'] = False
-        if self._dict['record']: self.stop_recording()
-        while not self._log_queue.empty():
-            pass
+        self.dic['connected'] = False
+        if self.dic['pipe']: self.__stop_pipe()
+        if self.dic['record']: self.stop_recording()
+        while not self.log_queue.empty(): pass
     
-    # ONLY USE THESE IF YOU KNOW WHAT YOU'RE DOING; QUEUE WILL BLOCK
-    def _start_pipe(self):
-        self._dict['pipe'] = True
+
+    # ONLY USE THESE IF YOU KNOW WHAT YOU'RE DOING
+    # QUEUE WILL BLOCK (and you'll be screwed if you're not pulling from it)
+    def __start_pipe(self):
+        self.dic['pipe'] = True
     
     
-    def _stop_pipe(self):
-        self._dict['pipe'] = False
+    def __stop_pipe(self):
+        self.dic['pipe'] = False
         try:
-            self._sample_queue.put('kill',timeout=0.5)
+            self.sample_queue.put('kill',timeout=0.5)
         except:
-            i = self._sample_queue.get()
-            self._sample_queue.put('kill')
+            i = self.sample_queue.get()
+            self.sample_queue.put('kill')
     
     
-def _mp150_sample(dic,pipe_que,log_que):
+def mp150_sample(dic,pipe_que,log_que):
     # load required library
-    try:
-        mpdev = windll.LoadLibrary('mpdev.dll')
+    try: mpdev = windll.LoadLibrary('mpdev.dll')
     except:
-        try:
-            mpdev = windll.LoadLibrary(os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll'))
-        except:
-            raise Exception("Error in libmpdev: could not load mpdev.dll")
+        try: mpdev = windll.LoadLibrary(os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll'))
+        except: raise Exception("Error in libmpdev: could not load mpdev.dll")
     
     # connect to the MP150
     # (101 is the code for the MP150, 103 for the MP36R)
     # (11 is a code for the communication method)
     # ('auto' is for automatically connecting to the first responding device)
-    try:
-        result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
-    except:
-        result = "failed to call connectMPDev"
+    try: result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
+    except: result = "failed to call connectMPDev"
     if check_returncode(result) != "MPSUCCESS":
         raise Exception("Error in libmpdev: failed to connect to the MP150: %s" % result)
 
     # set sampling rate
-    try:
-        result = mpdev.setSampleRate(c_double(dic['sampletime']))
-    except:
-        result = "failed to call setSampleRate"
+    try: result = mpdev.setSampleRate(c_double(dic['sampletime']))
+    except: result = "failed to call setSampleRate"
     if check_returncode(result) != "MPSUCCESS":
         raise Exception("Error in libmpdev: failed to set samplerate: %s" % result)
     
@@ -134,10 +127,8 @@ def _mp150_sample(dic,pipe_que,log_que):
         raise Exception("Error in libmpdev: failed to set channels to acquire: %s" % result)
     
     # start acquisition
-    try:
-        result = mpdev.startAcquisition()
-    except:
-        result = "failed to call startAcquisition"
+    try: result = mpdev.startAcquisition()
+    except: result = "failed to call startAcquisition"
     if check_returncode(result) != "MPSUCCESS":
         raise Exception("Error in libmpdev: failed to start acquisition: %s" % result)   
 
@@ -162,25 +153,20 @@ def _mp150_sample(dic,pipe_que,log_que):
             dic['newestsample'] = copy.deepcopy(data)
             currtime = int((time.time()-dic['starttime']) * 1000)
                             
-            if dic['record']:
-                log_que.put((currtime,data))
+            if dic['record']: log_que.put((currtime,data))
             
             if dic['pipe']:
-                try:
-                    pipe_que.put((currtime,data[0]),timeout=dic['sampletime']/1000)
-                except:
-                    pass
+                try: pipe_que.put((currtime,data[0]),timeout=dic['sampletime']/1000)
+                except: pass
     
     # close connection
-    try:
-        result = mpdev.disconnectMPDev()
-    except:
-        result = "failed to call disconnectMPDev"
+    try: result = mpdev.disconnectMPDev()
+    except: result = "failed to call disconnectMPDev"
     if check_returncode(result) != "MPSUCCESS":
         raise Exception("Error in libmpdev: failed to close the connection to the MP150: %s" % result)
 
     
-def _mp150_log(dic,log_que):
+def mp150_log(dic,log_que):
     f = open(dic['logname'],'a+')
     f.write('time,')
     for ch in np.where(dic['channels'])[0]: f.write('channel_%s,' % ch)
