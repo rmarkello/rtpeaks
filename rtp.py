@@ -9,6 +9,29 @@ import keypress
 from libmpdev import MP150
 
 class RTP(MP150):
+    """
+    Class for use in real-time detection of peaks and troughs.
+
+    Inherits from MP150 class (see: libmpdev.py). If you only want to record
+    BioPac MP150 data, use that class instead!
+
+    Methods
+    -------
+    start_peak_finding()
+        Begin detection and recording of peaks; will begin recording sampled 
+        data, if not already
+    stop_peak_finding()
+        Stop detection of peaks
+
+    Usage
+    -----
+    Instantiate class and call start_peak_finding() method. Upon peak/trough 
+    detection, class will simulate 'p' or 't' keypress. 
+
+    Notes
+    -----
+    Should NOT be used interactively.
+    """
     
     def __init__(self, logfile='default', samplerate=300, channels=[1,2,3], debug=False):
 
@@ -37,15 +60,15 @@ class RTP(MP150):
         self.peak_process.start()
         self.peak_log_process.start()
 
-        self.start_recording()
+        if not self.dic['record']: self.start_recording()
         self._start_pipe()
 
 
     def stop_peak_finding(self):
         self._stop_pipe()
+        
         # make sure peak logging finishes before closing the parent process...
         while not self.peak_queue.empty(): pass
-        self.close()
     
 
 def peak_log(log_file,que):
@@ -55,6 +78,7 @@ def peak_log(log_file,que):
     ----------
     log_file : str
         Name for log file output
+    
     que : multiprocessing.manager.Queue()
         To receive detected peaks/troughs from peak_finder() function
     """
@@ -80,10 +104,13 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
     ----------
     que_in : multiprocessing.manager.Queue()
         Queue for receiving data from the BioPac MP150
+    
     que_log : multiprocessing.manager.Queue()
         Queue to send detected peak information to peak_log() function
+    
     pf_start : int
         Time at which data sampling began
+    
     debug : bool
         Whether to print debugging statements
 
@@ -133,15 +160,22 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
 def peak_or_trough(signal, last_found):
     """Helper function for peak_finder()
 
-    Determines in any peaks or troughs were detected in signal that 
+    Determines if any peaks or troughs were detected in signal that 
     meet height threshold
 
     Parameters
     ----------
     signal : array
         Physio data since last peak/trough
+    
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
+
+    Returns
+    -------
+    bool, bool
+        First boolean is whether a peak was detected, second is whether a 
+        trough was detected. Maximum one True
     """
 
     peaks = scipy.signal.argrelmax(signal,order=10)[0] #HC
@@ -171,6 +205,12 @@ def gen_thresh(last_found,time=False):
         Class, time, and height of previously detected peaks/troughs
     time : bool
         Whether to generate time threshold (default: False, generates height)
+
+    Returns
+    -------
+    array, array
+        First array is heights of previous three peaks, second heights of
+        previous three troughs
     """
     
     col = 1 if time else 2
@@ -194,5 +234,6 @@ if __name__ == '__main__':
     r.start_peak_finding()
     time.sleep(60)
     r.stop_peak_finding()
+    r.close()
 
     print "Done!"

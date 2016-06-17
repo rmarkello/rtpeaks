@@ -10,14 +10,16 @@ if os.name != 'posix': from ctypes import windll, c_int, c_double, byref
 else: raise Exception("Sorry POSIX user: you have to use Windows to work with the BioPac!")
 
 def check_returncode(returncode):
+    """Checks return codes from BioPac MP150 device"""
     if returncode == 1: return "MPSUCCESS"
     else: return "UNKNOWN"
 
 
 class MP150(object):
+    """Class to sample and record data from BioPac MP device"""
     
     def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
-            
+        
         self.manager = mp.Manager()
         self.sample_queue = self.manager.Queue(5)
         self.log_queue = self.manager.Queue()
@@ -46,40 +48,66 @@ class MP150(object):
         
     
     def start_recording(self):
+        """Begins logging sampled data"""
+
         self.dic['record'] = True
         self.log_process.start()
     
     
     def stop_recording(self):
+        """Halts logging of sampled data and sends kill signal"""
+
         self.dic['record'] = False
         self.log_queue.put('kill')    
     
     def log(self, msg):
+        """Logs user-specified message in line with recorded data
+        
+        Parameters
+        ----------
+        msg : str
+            Message to be logged
+        """
+
         self.log_queue.put((get_timestamp(),'MSG',msg))    
     
     
     def sample(self):
+        """Returns most recently sampled datapoint"""
+
         return self.dic['newestsample']
     
     
     def get_timestamp(self):
+        """Returns current timestamp"""
+
         return int((time.time()-self.dic['start_time']) * 1000)
         
     
     def close(self):
+        """Closes connection with BioPac MP150"""
+
         self.dic['connected'] = False
         if self.dic['pipe']: self.__stop_pipe()
         if self.dic['record']: self.stop_recording()
         while not self.log_queue.empty(): pass
     
 
-    # ONLY USE THESE IF YOU KNOW WHAT YOU'RE DOING
-    # QUEUE WILL BLOCK (and you'll be screwed if you're not pulling from it)
     def _start_pipe(self):
+        """Begin sending sampled data to queue
+
+        Notes
+        -----
+        Queue will block, so only do this if you have concurrently set up
+        process to pull from queue.
+        """
+
         self.dic['pipe'] = True
     
     
     def _stop_pipe(self):
+        """Halts sending sampled data to queue and sends kill signal"""
+
         self.dic['pipe'] = False
         try:
             self.sample_queue.put('kill',timeout=0.5)
@@ -89,6 +117,44 @@ class MP150(object):
     
     
 def mp150_sample(dic,pipe_que,log_que):
+    """Continuously samples data from the BioPac MP150
+
+    Parameters
+    ----------
+    dic : multiprocessing.manager.Dict()
+
+        Required input
+        --------------
+        dic['sampletime']: float, 1000 / desired sampling rate
+        dic['channels']: list , specify recording channels (e.g., [1,5,7])
+
+        Set by mp150_sample()
+        ---------------------
+        dic['starttime']: int, time at which sampling begins
+        dic['connected']: boolean, continue sampling or not
+        dic['newestsample']: array, sampled data each timepoint
+
+        Optionally set
+        --------------
+        dic['record']: boolean, save sampled data to log file
+        dic['pipe']: boolean, send sampled data to queue
+
+    pipe_que : multiprocessing.manager.Queue()
+        Queue to send sampled data for use by another process
+    
+    que_log : multiprocessing.manager.Queue()
+        Queue to send sampled data to mp150_log() function
+
+    Methods
+    -------
+    Can pipe data via dic['record'] and dic['pipe'] set True
+
+    Notes
+    -----
+    If you set dic['pipe'] and are not actively pulling from it, it will
+    block at 5 entries; this will freeze up the whole process, so be careful!
+    """
+
     # load required library
     try: mpdev = windll.LoadLibrary('mpdev.dll')
     except:
@@ -96,9 +162,7 @@ def mp150_sample(dic,pipe_que,log_que):
         except: raise Exception("Error in libmpdev: could not load mpdev.dll")
     
     # connect to the MP150
-    # (101 is the code for the MP150, 103 for the MP36R)
-    # (11 is a code for the communication method)
-    # ('auto' is for automatically connecting to the first responding device)
+    # (101 is the code for the MP150; use 103 for the MP36R)
     try: result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
     except: result = "failed to call connectMPDev"
     if check_returncode(result) != "MPSUCCESS":
@@ -163,6 +227,21 @@ def mp150_sample(dic,pipe_que,log_que):
 
     
 def mp150_log(dic,log_que):
+    """Creates log file for physio data
+
+    Parameters
+    ----------
+    dic : multiprocessing.manager.Dict()
+
+        Required input
+        --------------
+        dic['logname']: name for logfile
+        dic['channels']: specify recording channels
+   
+    que : multiprocessing.manager.Queue()
+        To receive detected peaks/troughs from peak_finder() function
+    """
+
     f = open(dic['logname'],'a+')
     f.write('time,')
     for ch in np.where(dic['channels'])[0]: f.write('channel_%s,' % ch)
