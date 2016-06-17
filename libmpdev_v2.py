@@ -26,9 +26,7 @@ class MP150(object):
         self.log_queue = self.manager.Queue()
         self.dic = self.manager.dict()
         
-        self.samplerate = samplerate
-        self.dic['sampletime'] = 1000.0 / self.samplerate
-        self._sampletimesec = self.dic['sampletime'] / 1000.0
+        self.dic['sampletime'] = 1000.0 / samplerate
         
         self.dic['logname'] = "%s_MP150_data.csv" % (logfile)
         self.dic['newestsample'] = [0]*len(channels)
