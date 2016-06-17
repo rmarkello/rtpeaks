@@ -30,7 +30,6 @@ class MP150(object):
         self.dic['pipe'] = False
         self.dic['record'] = False
         self.dic['connected'] = False
-        self.dic['starttime'] = time.time()
         self.dic['channels'] = channels
         
         self.sample_process = mp.Process(target = mp150_sample,
@@ -53,8 +52,7 @@ class MP150(object):
     
     def stop_recording(self):
         self.dic['record'] = False
-        self.log_queue.put('kill')
-    
+        self.log_queue.put('kill')    
     
     def log(self, msg):
         self.log_queue.put((get_timestamp(),'MSG',msg))    
@@ -77,11 +75,11 @@ class MP150(object):
 
     # ONLY USE THESE IF YOU KNOW WHAT YOU'RE DOING
     # QUEUE WILL BLOCK (and you'll be screwed if you're not pulling from it)
-    def __start_pipe(self):
+    def _start_pipe(self):
         self.dic['pipe'] = True
     
     
-    def __stop_pipe(self):
+    def _stop_pipe(self):
         self.dic['pipe'] = False
         try:
             self.sample_queue.put('kill',timeout=0.5)
