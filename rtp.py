@@ -56,7 +56,9 @@ class RTP(MP150):
 
     
     
-    def start_peak_finding(self):        
+    def start_peak_finding(self):
+        """Begin peak finding process and start logging data, if necessary"""
+
         self.peak_process.start()
         self.peak_log_process.start()
 
@@ -65,8 +67,9 @@ class RTP(MP150):
 
 
     def stop_peak_finding(self):
+        """Stop peak finding process"""
+
         self._stop_pipe()
-        
         # make sure peak logging finishes before closing the parent process...
         while not self.peak_queue.empty(): pass
     
@@ -203,6 +206,7 @@ def gen_thresh(last_found,time=False):
     ----------
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
+    
     time : bool
         Whether to generate time threshold (default: False, generates height)
 
