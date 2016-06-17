@@ -6,12 +6,9 @@ import copy
 import numpy as np
 import multiprocessing as mp
 
-if os.name != 'posix':
-    from ctypes import windll, c_int, c_double, byref
-else:
-    raise Exception("Sorry Mac/Linux/POSIX user: you have to use Windows to work with the BioPac!")
+if os.name != 'posix': from ctypes import windll, c_int, c_double, byref
+else: raise Exception("Sorry POSIX user: you have to use Windows to work with the BioPac!")
 
-# error handling
 def check_returncode(returncode):
     if returncode == 1: return "MPSUCCESS"
     else: return "UNKNOWN"
@@ -36,10 +33,13 @@ class MP150(object):
         self.dic['starttime'] = time.time()
         self.dic['channels'] = channels
         
-        self.sample_process = mp.Process(target=mp150_sample,
-                                            args=(self.dic,self.sample_queue,self.log_queue)) 
-        self.log_process = mp.Process(target=mp150_log,
-                                        args=(self.dic,self.log_queue))
+        self.sample_process = mp.Process(target = mp150_sample,
+                                            args = (self.dic,
+                                                    self.sample_queue,
+                                                    self.log_queue)) 
+        self.log_process = mp.Process(target = mp150_log,
+                                        args = (self.dic,
+                                                self.log_queue))
         
         self.log_process.daemon = True
         self.sample_process.daemon = True
