@@ -5,8 +5,10 @@ import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
+import matplotlib.pyplot as plt
 import keypress
 from libmpdev import MP150
+
 
 class RTP(MP150):
     """
@@ -53,7 +55,6 @@ class RTP(MP150):
 
         self.peak_process.daemon = True
         self.peak_log_process.daemon = True
-
     
     
     def start_peak_finding(self):
@@ -72,7 +73,7 @@ class RTP(MP150):
         self._stop_pipe()
         # make sure peak logging finishes before closing the parent process...
         while not self.peak_queue.empty(): pass
-    
+
 
 def peak_log(log_file,que):
     """Creates log file for detected peaks/troughs
@@ -87,14 +88,14 @@ def peak_log(log_file,que):
     """
 
     f = open(log_file,'a+')
-    f.write('time_detected,time_received,amplitude\n')
+    f.write('time_detected,time_received,amplitude,peak\n')
     f.flush()
     
     while True:
         i = que.get()
         if i == 'kill': break
         else: 
-            f.write('%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]')))
+            f.write('%s,%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]'),i[3]))
             f.flush()
     
     f.close()
@@ -144,7 +145,7 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
         if (peak or trough) and (i[0]-last_found[-1,1] > rr_thresh):
             sig = np.empty(0)
             
-            que_log.put((int((time.time()-pf_start)*1000),i[0],i[1]))
+            que_log.put((int((time.time()-pf_start)*1000),i[0],i[1],int(peak)))
             
             last_found = np.vstack((last_found,
                                     [peak,i[0],i[1]]))
@@ -181,11 +182,11 @@ def peak_or_trough(signal, last_found):
         trough was detected. Maximum one True
     """
 
-    peaks = scipy.signal.argrelmax(signal,order=10)[0] #HC
-    troughs = scipy.signal.argrelmin(signal,order=10)[0] #HC
+    peaks = scipy.signal.argrelmax(signal,order=10)[0]
+    troughs = scipy.signal.argrelmin(signal,order=10)[0]
         
     peak_height, trough_height = gen_thresh(last_found)
-    thresh = np.mean(np.abs(peak_height-trough_height))/2.
+    thresh = np.mean(np.abs(peak_height-trough_height))/3. #HC
     
     if peaks.size and (last_found[-1,0] != 1):
         if np.abs(signal[peaks[-1]]-trough_height[-1]) > thresh:

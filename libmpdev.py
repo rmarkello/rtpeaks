@@ -18,7 +18,7 @@ def check_returncode(returncode):
 class MP150(object):
     """Class to sample and record data from BioPac MP device"""
     
-    def __init__(self, logfile='default', samplerate=200, channels=[1,2,3]):
+    def __init__(self, logfile='default', samplerate=300, channels=[1,2,3]):
         
         self.manager = mp.Manager()
         self.sample_queue = self.manager.Queue(5)
@@ -194,9 +194,7 @@ def mp150_sample(dic,pipe_que,log_que):
 
     dic['starttime'] = time.time()
     dic['connected'] = True
-    
-    print "Ready to process samples"
-    
+        
     # process samples    
     while dic['connected']:
         try:
