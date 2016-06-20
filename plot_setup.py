@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# quick script to visualize waveform for BioPac MP150 to aid in setup
+# quick script to visualize waveform for BioPac MP150 to aid in setupp
 
 import time
 from msvcrt import kbhit, getch
@@ -11,7 +11,7 @@ from libmpdev import MP150
 if __name__ == '__main__':
     plt.style.use('ggplot')
 
-    r = MP150(channels = [1],samplerate=300)
+    r = MP150(channels = [5], samplerate = 500.)
     while not r.dic['connected']: pass
 
     sig = np.zeros(100)
@@ -36,8 +36,6 @@ if __name__ == '__main__':
 
         li.set(ydata=sig)
         fig.canvas.draw()
-
-        time.sleep(0.01)
 
     r.close()
     print "Done!"

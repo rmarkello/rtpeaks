@@ -35,7 +35,7 @@ class RTP(MP150):
     Should NOT be used interactively.
     """
     
-    def __init__(self, logfile='default', samplerate=300, channels=[1,2,3], debug=False):
+    def __init__(self, logfile='default', samplerate=500, channels=[1,2,3], debug=False):
 
         MP150.__init__(self, logfile, samplerate, channels)
 
@@ -136,16 +136,21 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
         i = que_in.get()
         if i == 'kill': break
 
+        trec = int((time.time()-pf_start)*1000)
+
+        if debug and np.abs(trec-i[0])>1000: 
+            print "Rec_time, samp_time, dpoint: %s, %s, %s" % (trec, i[0], i[1])
+
         sig = np.append(sig,i[1])
         peak, trough = peak_or_trough(sig,last_found)
         
-        pt, tt = gen_thresh(last_found,time=True)
+        pt, tt = gen_thresh(last_found, time=True)
         rr_thresh = np.mean(np.abs(pt-tt))/2.
                 
         if (peak or trough) and (i[0]-last_found[-1,1] > rr_thresh):
             sig = np.empty(0)
             
-            que_log.put((int((time.time()-pf_start)*1000),i[0],i[1],int(peak)))
+            que_log.put((trec,i[0],i[1],int(peak)))
             
             last_found = np.vstack((last_found,
                                     [peak,i[0],i[1]]))
@@ -182,8 +187,8 @@ def peak_or_trough(signal, last_found):
         trough was detected. Maximum one True
     """
 
-    peaks = scipy.signal.argrelmax(signal,order=10)[0]
-    troughs = scipy.signal.argrelmin(signal,order=10)[0]
+    peaks = scipy.signal.argrelmax(signal,order=2)[0]
+    troughs = scipy.signal.argrelmin(signal,order=2)[0]
         
     peak_height, trough_height = gen_thresh(last_found)
     thresh = np.mean(np.abs(peak_height-trough_height))/3. #HC
@@ -233,6 +238,7 @@ def gen_thresh(last_found,time=False):
 
 if __name__ == '__main__':
     r = RTP(logfile = time.ctime().split(' ')[3].replace(':','_'),
+            samplerate=500.,
             channels = [1],
             debug = True)
 

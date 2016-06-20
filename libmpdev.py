@@ -2,7 +2,6 @@
 
 import os
 import time
-import copy
 import numpy as np
 import multiprocessing as mp
 
@@ -18,10 +17,10 @@ def check_returncode(returncode):
 class MP150(object):
     """Class to sample and record data from BioPac MP device"""
     
-    def __init__(self, logfile='default', samplerate=300, channels=[1,2,3]):
+    def __init__(self, logfile='default', samplerate=500., channels=[1,2,3]):
         
         self.manager = mp.Manager()
-        self.sample_queue = self.manager.Queue(5)
+        self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
         self.dic = self.manager.dict()
         
@@ -60,6 +59,7 @@ class MP150(object):
         self.dic['record'] = False
         self.log_queue.put('kill')    
     
+
     def log(self, msg):
         """Logs user-specified message in line with recorded data
         
@@ -194,6 +194,8 @@ def mp150_sample(dic,pipe_que,log_que):
 
     dic['starttime'] = time.time()
     dic['connected'] = True
+
+    print mpdev.getStatusMPDev()
         
     # process samples    
     while dic['connected']:
@@ -203,12 +205,12 @@ def mp150_sample(dic,pipe_que,log_que):
             result = mpdev.getMostRecentSample(byref(data))
             data = np.array(tuple(data))[dic['channels']==1]
         except:
-            result = "failed to call getMPBuffer"
+            result = "failed to call getMostRecentSample"
             if check_returncode(result) != "MPSUCCESS":
                 raise Exception("Error in libmpdev: failed to obtain a sample from the MP150: %s" % result)
         
         if not np.all(data == dic['newestsample']):
-            dic['newestsample'] = copy.deepcopy(data)
+            dic['newestsample'] = data.copy()
             currtime = int((time.time()-dic['starttime']) * 1000)
                             
             if dic['record']: log_que.put((currtime,data))
