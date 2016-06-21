@@ -1,4 +1,5 @@
 *.pyc
 *.csv
+.DS_Store
 plot_data.py
-mpdev.dll
+rtpeaks/mpdev.dll

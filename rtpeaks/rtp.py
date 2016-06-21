@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 
-import os
 import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
-import matplotlib.pyplot as plt
-import keypress
-from libmpdev import MP150
+import rtpeaks.keypress as keypress
+from rtpeaks.libmpdev import MP150
 
 
 class RTP(MP150):
@@ -95,7 +93,7 @@ def peak_log(log_file,que):
         i = que.get()
         if i == 'kill': break
         else: 
-            f.write('%s,%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]'),i[3]))
+            f.write('%s,%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]'), i[3]))
             f.flush()
     
     f.close()
@@ -234,17 +232,3 @@ def gen_thresh(last_found,time=False):
         trough_height = trough_height[trough_height.size-peak_height.size:]
     
     return peak_height, trough_height
-
-
-if __name__ == '__main__':
-    r = RTP(logfile = time.ctime().split(' ')[3].replace(':','_'),
-            samplerate=500.,
-            channels = [1],
-            debug = True)
-
-    r.start_peak_finding()
-    time.sleep(60)
-    r.stop_peak_finding()
-    r.close()
-
-    print "Done!"

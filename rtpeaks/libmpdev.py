@@ -4,9 +4,7 @@ import os
 import time
 import numpy as np
 import multiprocessing as mp
-
-if os.name != 'posix': from ctypes import windll, c_int, c_double, byref
-else: raise Exception("Sorry POSIX user: you have to use Windows to work with the BioPac!")
+from ctypes import windll, c_int, c_double, byref
 
 def check_returncode(returncode):
     """Checks return codes from BioPac MP150 device"""
@@ -27,7 +25,7 @@ class MP150(object):
         self.dic['sampletime'] = 1000.0 / samplerate
         
         self.dic['logname'] = "%s_MP150_data.csv" % (logfile)
-        self.dic['newestsample'] = [0]*len(channels)
+        self.dic['newestsample'] = [0]*16
         self.dic['pipe'] = False
         self.dic['record'] = False
         self.dic['connected'] = False
@@ -151,8 +149,8 @@ def mp150_sample(dic,pipe_que,log_que):
 
     Notes
     -----
-    If you set dic['pipe'] and are not actively pulling from it, it will
-    block at 5 entries; this will freeze up the whole process, so be careful!
+    Probably best not to use dic['pipe'] if you aren't actively pulling
+    from it!
     """
 
     # load required library
@@ -176,7 +174,7 @@ def mp150_sample(dic,pipe_que,log_que):
     
     # set acquisition channels
     try:
-        chnls = [0]*12
+        chnls = [0]*16
         for x in dic['channels']: chnls[x-1] = 1
         dic['channels'] = np.array(chnls)
         chnls = (c_int * len(chnls))(*chnls)
@@ -200,7 +198,7 @@ def mp150_sample(dic,pipe_que,log_que):
     # process samples    
     while dic['connected']:
         try:
-            data = [0]*12
+            data = [0]*16
             data = (c_double * len(data))(*data)
             result = mpdev.getMostRecentSample(byref(data))
             data = np.array(tuple(data))[dic['channels']==1]
