@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# quick script to visualize waveform for BioPac MP150 to aid in setupp
+# quick script to visualize waveform for BioPac MP150 to aid in setup
 
 import os
 import time
@@ -8,12 +8,17 @@ if os.name != 'posix': from msvcrt import kbhit, getch
 else: raise OSError("Need Windows")
 import numpy as np
 import matplotlib.pyplot as plt
-import rtpeaks import MP150
+try: 
+    from rtpeaks import MP150
+except ImportError: 
+    import sys
+    sys.path.append(os.path.dirname(os.getcwd()))
+    from rtpeaks import MP150
 
 if __name__ == '__main__':
     plt.style.use('ggplot')
 
-    r = MP150(channels = [5], samplerate = 500.)
+    r = MP150(channels = [1], samplerate = 500.)
     while not r.dic['connected']: pass
 
     sig = np.zeros(100)

@@ -192,8 +192,6 @@ def mp150_sample(dic,pipe_que,log_que):
 
     dic['starttime'] = time.time()
     dic['connected'] = True
-
-    print mpdev.getStatusMPDev()
         
     # process samples    
     while dic['connected']:

@@ -4,8 +4,8 @@ import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
-import rtpeaks.keypress as keypress
-from rtpeaks.libmpdev import MP150
+import keypress
+from libmpdev import MP150
 
 
 class RTP(MP150):
