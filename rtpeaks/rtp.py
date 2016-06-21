@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
-import os
 import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
-import keypress
-from libmpdev import MP150
+import rtpeaks.keypress as keypress
+from rtpeaks.libmpdev import MP150
+
 
 class RTP(MP150):
     """
@@ -33,7 +33,7 @@ class RTP(MP150):
     Should NOT be used interactively.
     """
     
-    def __init__(self, logfile='default', samplerate=300, channels=[1,2,3], debug=False):
+    def __init__(self, logfile='default', samplerate=500, channels=[1,2,3], debug=False):
 
         MP150.__init__(self, logfile, samplerate, channels)
 
@@ -53,10 +53,11 @@ class RTP(MP150):
 
         self.peak_process.daemon = True
         self.peak_log_process.daemon = True
+    
+    
+    def start_peak_finding(self):
+        """Begin peak finding process and start logging data, if necessary"""
 
-    
-    
-    def start_peak_finding(self):        
         self.peak_process.start()
         self.peak_log_process.start()
 
@@ -65,11 +66,12 @@ class RTP(MP150):
 
 
     def stop_peak_finding(self):
+        """Stop peak finding process"""
+
         self._stop_pipe()
-        
         # make sure peak logging finishes before closing the parent process...
         while not self.peak_queue.empty(): pass
-    
+
 
 def peak_log(log_file,que):
     """Creates log file for detected peaks/troughs
@@ -84,14 +86,14 @@ def peak_log(log_file,que):
     """
 
     f = open(log_file,'a+')
-    f.write('time_detected,time_received,amplitude\n')
+    f.write('time_detected,time_received,amplitude,peak\n')
     f.flush()
     
     while True:
         i = que.get()
         if i == 'kill': break
         else: 
-            f.write('%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]')))
+            f.write('%s,%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]'), i[3]))
             f.flush()
     
     f.close()
@@ -132,16 +134,21 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
         i = que_in.get()
         if i == 'kill': break
 
+        trec = int((time.time()-pf_start)*1000)
+
+        if debug and np.abs(trec-i[0])>1000: 
+            print "Rec_time, samp_time, dpoint: %s, %s, %s" % (trec, i[0], i[1])
+
         sig = np.append(sig,i[1])
         peak, trough = peak_or_trough(sig,last_found)
         
-        pt, tt = gen_thresh(last_found,time=True)
+        pt, tt = gen_thresh(last_found, time=True)
         rr_thresh = np.mean(np.abs(pt-tt))/2.
                 
         if (peak or trough) and (i[0]-last_found[-1,1] > rr_thresh):
             sig = np.empty(0)
             
-            que_log.put((int((time.time()-pf_start)*1000),i[0],i[1]))
+            que_log.put((trec,i[0],i[1],int(peak)))
             
             last_found = np.vstack((last_found,
                                     [peak,i[0],i[1]]))
@@ -178,11 +185,11 @@ def peak_or_trough(signal, last_found):
         trough was detected. Maximum one True
     """
 
-    peaks = scipy.signal.argrelmax(signal,order=10)[0] #HC
-    troughs = scipy.signal.argrelmin(signal,order=10)[0] #HC
+    peaks = scipy.signal.argrelmax(signal,order=2)[0]
+    troughs = scipy.signal.argrelmin(signal,order=2)[0]
         
     peak_height, trough_height = gen_thresh(last_found)
-    thresh = np.mean(np.abs(peak_height-trough_height))/2.
+    thresh = np.mean(np.abs(peak_height-trough_height))/3. #HC
     
     if peaks.size and (last_found[-1,0] != 1):
         if np.abs(signal[peaks[-1]]-trough_height[-1]) > thresh:
@@ -203,6 +210,7 @@ def gen_thresh(last_found,time=False):
     ----------
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
+    
     time : bool
         Whether to generate time threshold (default: False, generates height)
 
@@ -224,16 +232,3 @@ def gen_thresh(last_found,time=False):
         trough_height = trough_height[trough_height.size-peak_height.size:]
     
     return peak_height, trough_height
-
-
-if __name__ == '__main__':
-    r = RTP(logfile = time.ctime().split(' ')[3].replace(':','_'),
-            channels = [1],
-            debug = True)
-
-    r.start_peak_finding()
-    time.sleep(60)
-    r.stop_peak_finding()
-    r.close()
-
-    print "Done!"

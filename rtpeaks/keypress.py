@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#http://stackoverflow.com/questions/13564851/generate-keyboard-events
+# http://stackoverflow.com/questions/13564851/generate-keyboard-events
 
 import ctypes
 from ctypes import wintypes
