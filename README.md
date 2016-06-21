@@ -64,3 +64,12 @@ This small chunk of code will create two files:
    2. The time it occurred in the original datastream, 
    3. The amplitude of the peak/trough, and
    4. Whether it was a peak (1) or trough (0)
+
+## Copyright & Disclaimers
+
+rtpeaks is distributed under Version 3 of the GNU Public License. For more details,
+see LICENSE.
+
+BIOPAC is a trademark of BIOPAC Systems, Inc. The authors of this software have no 
+affiliation with BIOPAC Systems, Inc, and that company neither supports nor endorses 
+this software package.
