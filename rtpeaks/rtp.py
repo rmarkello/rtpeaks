@@ -7,7 +7,6 @@ import scipy.signal
 import keypress
 from libmpdev import MP150
 
-
 class RTP(MP150):
     """
     Class for use in real-time detection of peaks and troughs.
@@ -72,7 +71,6 @@ class RTP(MP150):
         # make sure peak logging finishes before closing the parent process...
         while not self.peak_queue.empty(): pass
 
-
 def peak_log(log_file,que):
     """Creates log file for detected peaks/troughs
 
@@ -80,7 +78,6 @@ def peak_log(log_file,que):
     ----------
     log_file : str
         Name for log file output
-    
     que : multiprocessing.manager.Queue()
         To receive detected peaks/troughs from peak_finder() function
     """
@@ -93,7 +90,7 @@ def peak_log(log_file,que):
         i = que.get()
         if i == 'kill': break
         else: 
-            f.write('%s,%s,%s,%s\n' % (i[0], i[1], str(i[2]).strip('[]'), i[3]))
+            f.write("{0},{1},{2},{3}\n".format(i[0], i[1], str(i[2]).strip('[]'), i[3]))
             f.flush()
     
     f.close()
@@ -106,13 +103,10 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
     ----------
     que_in : multiprocessing.manager.Queue()
         Queue for receiving data from the BioPac MP150
-    
     que_log : multiprocessing.manager.Queue()
         Queue to send detected peak information to peak_log() function
-    
     pf_start : int
         Time at which data sampling began
-    
     debug : bool
         Whether to print debugging statements
 
@@ -127,9 +121,7 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
                            [-1,0,0]]*3)
     
     P_KEY, T_KEY = 0x50, 0x54
-    
-    print "Ready to find peaks..."
-    
+        
     while True:
         i = que_in.get()
         if i == 'kill': break
@@ -137,15 +129,31 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
         trec = int((time.time()-pf_start)*1000)
 
         if debug and np.abs(trec-i[0])>1000: 
-            print "Rec_time, samp_time, dpoint: %s, %s, %s" % (trec, i[0], i[1])
+            print("Rec_time, samp_time, dpoint: {:>6}, {:>6}, {:>6.3f}".format(trec, i[0], i[1]))
 
         sig = np.append(sig,i[1])
         peak, trough = peak_or_trough(sig,last_found)
         
         pt, tt = gen_thresh(last_found, time=True)
         rr_thresh = np.mean(np.abs(pt-tt))/2.
-                
-        if (peak or trough) and (i[0]-last_found[-1,1] > rr_thresh):
+
+        # too long since a detected peak/trough!
+        if (i[0]-last_found[-1,1]) > 12000.: 
+            # press the required key (whatever it is)
+            last = last_found[-1,0]
+            keypress.PressKey(P_KEY if last else T_KEY)
+            keypress.ReleaseKey(P_KEY if last else T_KEY)
+
+            # reset everything
+            sig = np.empty(0)
+            last_found = np.array([[1 if last else 0,0,0],
+                                   [0 if last else 1,0,0],
+                                   [last,0,0]]*3)
+
+            # tell the log file that this was forced (i.e, [x, x, x, 2])
+            que_log.put((trec,i[0],i[1],2)
+
+        elif (peak or trough) and (i[0]-last_found[-1,1] > rr_thresh):
             sig = np.empty(0)
             
             que_log.put((trec,i[0],i[1],int(peak)))
@@ -156,7 +164,7 @@ def peak_finder(que_in,que_log,pf_start,debug=False):
             keypress.PressKey(P_KEY if peak else T_KEY)
             keypress.ReleaseKey(P_KEY if peak else T_KEY)
                 
-            if debug: print "Found %s" % ("peak" if peak else "trough")
+            if debug: print("Found {}".format("peak" if peak else "trough"))
             
         elif (peak or trough) and (i[0]-last_found[-1,1] < rr_thresh):
             sig = np.empty(0)
@@ -174,7 +182,6 @@ def peak_or_trough(signal, last_found):
     ----------
     signal : array
         Physio data since last peak/trough
-    
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
 
@@ -210,15 +217,14 @@ def gen_thresh(last_found,time=False):
     ----------
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
-    
     time : bool
         Whether to generate time threshold (default: False, generates height)
 
     Returns
     -------
-    array, array
-        First array is heights of previous three peaks, second heights of
-        previous three troughs
+    array * 2
+        First array is heights of previous three peaks
+        Second array is heights of previous three troughs
     """
     
     col = 1 if time else 2
@@ -226,6 +232,7 @@ def gen_thresh(last_found,time=False):
     peak_height = last_found[last_found[:,0]==1,col][-3:]
     trough_height = last_found[last_found[:,0]==0,col][-3:]
     
+    # genuinely don't think this does anything...
     if peak_height.size > trough_height.size:
         peak_height = peak_height[peak_height.size-trough_height.size:]
     elif trough_height.size > peak_height.size:

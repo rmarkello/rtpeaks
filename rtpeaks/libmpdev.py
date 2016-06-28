@@ -192,7 +192,7 @@ def mp150_sample(dic,pipe_que,log_que):
 
     dic['starttime'] = time.time()
     dic['connected'] = True
-        
+    
     # process samples    
     while dic['connected']:
         try:
