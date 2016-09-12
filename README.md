@@ -3,7 +3,7 @@ For use in the (mostly) real-time detection of physiological peaks using BioPac 
 
 ## Software Requirements
 * Windows (only tested on 7)
-* Python 2.7
+* Python >= 2.7
 * numpy
 * scipy
 * matplotlib
@@ -29,9 +29,7 @@ pf = rtpeaks.RTP(logfile = 'test', channels = [1,9], samplerate=200.)
 # Initiate peak/trough detection whenever you're ready. But be careful to not
 # start too soon. Once begun, the class will imitate keypresses ('p' for peaks 
 # and 't' for troughs).
-#
-# Also, make sure you're in a good working directory. There are a few files
-# output that you probably don't want to lose!
+
 pf.start_peak_finding()
 
 ##############################################################
@@ -41,7 +39,7 @@ pf.start_peak_finding()
 # Stop active peak/trough detection (keypresses will cease)
 pf.stop_peak_finding()
 
-# Close the class instance and disconnect from the BioPac
+# Stop recording data and disconnect from the BioPac
 pf.close()
 
 # Note: you can stop peak finding and still continue recording. The RTP class
