@@ -90,17 +90,18 @@ class MP150(object):
         while not self.log_queue.empty(): pass
     
 
-    def _start_pipe(self):
+    def _start_pipe(self,channel):
         """Begin sending sampled data to queue"""
         
+        if isinstance(channel, list): channel = channel[0]
         if not self.dic['record']: self.start_recording()
-        self.dic['pipe'] = True
+        self.dic['pipe'] = list(channel-1)
     
     
     def _stop_pipe(self):
         """Halts sending sampled data to queue and sends kill signal"""
 
-        self.dic['pipe'] = False
+        self.dic['pipe'] = []
         
         try:
             self.sample_queue.put('kill',timeout=0.5)
@@ -157,7 +158,7 @@ def mp150_sample(dic,pipe_que,log_que):
             if dic['record']: log_que.put([currtime,data])
             
             if dic['pipe']:
-                try: pipe_que.put([currtime,data[0]],timeout=dic['sampletime']/1000)
+                try: pipe_que.put([currtime,data[dic['pipe']]],timeout=dic['sampletime']/1000)
                 except: pass
     
     # close connection

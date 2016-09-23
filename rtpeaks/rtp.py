@@ -55,13 +55,13 @@ class RTP(MP150):
         self.peak_log_process.daemon = True
 
     
-    def start_peak_finding(self):
+    def start_peak_finding(self,channel=[1],interp=False):
         """Begin peak finding process and start logging data, if necessary"""
 
         self.peak_process.start()
         self.peak_log_process.start()
 
-        self._start_pipe()
+        self._start_pipe(channel=channel)
 
 
     def stop_peak_finding(self):
@@ -71,6 +71,11 @@ class RTP(MP150):
         
         # make sure peak logging finishes before closing the parent process...
         while not self.peak_queue.empty(): pass
+
+
+    def start_baseline(self):
+
+        if not self.dic['record']: self.start_recording()
 
 
 def peak_log(log,que):
@@ -139,7 +144,7 @@ def peak_finder(qin,qlog,pft,debug=False):
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!
-        if not (peak or trough) and (i[0]-last_found[-1,1]) > 12000.: #HC
+        if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 12000.: #HC
             # press the required key (whatever it is)
             last = last_found[-1,0]
             keypress.PressKey(0x50 if last else 0x54)
