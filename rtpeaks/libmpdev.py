@@ -34,47 +34,56 @@ class MP150(object):
     
     def __init__(self, logfile='default', samplerate=500., channels=[1,2]):
         
+        self.logfile = logfile
         self.manager = mp.Manager()
+
+        f = {   'sampletime'    : 1000. / samplerate,
+                'newestsample'  : [0]*16,
+                'pipe'          : [],
+                'record'        : False,
+                'connected'     : False,
+                'channels'      : channels      }
+                
+        self.dic = self.manager.dict(f)
+        
         self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
-        self.dic = self.manager.dict()
-        
-        self.dic['sampletime'] = 1000.0 / samplerate
-        
-        self.dic['newestsample'] = [0]*16
-        self.dic['pipe'] = False
-        self.dic['record'] = False
-        self.dic['connected'] = False
-        self.dic['channels'] = channels
-        
-        self.sample_process = mp.Process(   target = mp150_sample,
-                                            args = (self.dic,
-                                                    self.sample_queue,
-                                                    self.log_queue)) 
-        self.log_process = mp.Process(  target = mp150_log,
-                                        args = ("{}_MP150_data.csv".format(logfile),
-                                                self.dic['channels'],
-                                                self.log_queue))
-        
-        self.log_process.daemon = True
+        self.sample_process = mp.Process(target = mp150_sample,
+                                         args   = (self.dic,
+                                                   self.sample_queue,
+                                                   self.log_queue)) 
         self.sample_process.daemon = True
+
         self.sample_process.start()
         
     
-    def start_recording(self):
+    def start_recording(self, run=None):
         """Begins logging sampled data"""
-
+        
+        if self.dic['record']: self.stop_recording()
+        
         self.dic['record'] = True
+
+        if run: fname = "{}-{}_MP150_data.csv".format(self.logfile, str(run))
+        else: fname = "{}_MP150_data.csv".format(self.logfile)
+
+        self.log_process = mp.Process(target = mp150_log,
+                                      args   = (fname,
+                                                self.dic['channels'],
+                                                self.log_queue))
+        self.log_process.daemon = True
         self.log_process.start()
-    
+
     
     def stop_recording(self):
         """Halts logging of sampled data and sends kill signal"""
 
         self.dic['record'] = False
-        self.log_queue.put('kill')    
-    
-    
+        
+        self.log_queue.put('kill')
+        self.log_process.join()
+        
+
     def sample(self):
         """Returns most recently sampled datapoint"""
 
@@ -85,31 +94,39 @@ class MP150(object):
         """Closes connection with BioPac MP150"""
 
         self.dic['connected'] = False
-        if self.dic['pipe']: self.__stop_pipe()
+        if self.dic['pipe']: self.dic['pipe'] = []
         if self.dic['record']: self.stop_recording()
-        while not self.log_queue.empty(): pass
-    
+   
 
-    def _start_pipe(self,channel):
-        """Begin sending sampled data to queue"""
-        
-        if isinstance(channel, list): channel = channel[0]
-        if not self.dic['record']: self.start_recording()
-        self.dic['pipe'] = list(channel-1)
-    
-    
-    def _stop_pipe(self):
-        """Halts sending sampled data to queue and sends kill signal"""
+def mp150_log(log,channels,que):
+    """Creates log file for physio data
 
-        self.dic['pipe'] = []
-        
-        try:
-            self.sample_queue.put('kill',timeout=0.5)
-        except:
-            i = self.sample_queue.get()
-            self.sample_queue.put('kill')
+    Parameters
+    ----------
+    log : str
+        Name of log file to record sampled data to
+    channels : array-like
+        What channels data is being acquired for
+    que : multiprocessing.manager.Queue()
+        To receive detected peaks/troughs from peak_finder() function
+    """
+
+    ch = ',channel'.join(str(y) for y in channels.tolist())
+    f = open(log,'a+')
+    f.write('time,channel{0}\n'.format(ch))
+    f.flush()
     
-    
+    while True:
+        i = que.get()
+        if i == 'kill': break
+        else:
+            sig = ','.join(str(y) for y in list(i[1]))
+            f.write('{:0.3f},{1}\n'.format(i[0],sig))
+            f.flush()
+
+    f.close()
+
+     
 def mp150_sample(dic,pipe_que,log_que):
     """Continuously samples data from the BioPac MP150
 
@@ -129,11 +146,11 @@ def mp150_sample(dic,pipe_que,log_que):
         Optionally set
         --------------
         dic['record']: boolean, save sampled data to log file
-        dic['pipe']: boolean, send sampled data to queue
+        dic['pipe']: list-of-int, send specified data channels to queue
 
     pipe_que : multiprocessing.manager.Queue()
         Queue to send sampled data for use by another process
-    que_log : multiprocessing.manager.Queue()
+    log_que : multiprocessing.manager.Queue()
         Queue to send sampled data to mp150_log() function
 
     Methods
@@ -149,13 +166,14 @@ def mp150_sample(dic,pipe_que,log_que):
     
     # process samples    
     while dic['connected']:
-        data = sample_data(mpdev,dic['channels'])
+        data = sample_data(mpdev, dic['channels'])
         
         if not np.all(data == dic['newestsample']):
             dic['newestsample'] = data.copy()
             currtime = (time.time()-dic['starttime']) * 1000
                             
-            if dic['record']: log_que.put([currtime,data])
+            if dic['record']: 
+                log_que.put([currtime,data])
             
             if dic['pipe']:
                 try: pipe_que.put([currtime,data[dic['pipe']]],timeout=dic['sampletime']/1000)
@@ -174,23 +192,23 @@ def sample_data(dll,channels):
     Parameters
     ----------
     dll : from ctypes.windll.LoadLibrary()
-    channels : numpy.ndarray (1x16)
+    channels : numpy.ndarray (1x16, boolean)
         True where acquiring channel data
 
     Returns
     -------
     array (1xn) : sampled data
     """
+    
+    data = [0]*16
+    data = (c_double * len(data))(*data)
 
-    try:
-        data = [0]*16
-        data = (c_double * len(data))(*data)
-        result = mpdev.getMostRecentSample(byref(data))
-        data = np.array(tuple(data))[channels==1]
-    except: 
-        result = 0
+    try: result = mpdev.getMostRecentSample(byref(data))
+    except: result = 0
     if get_returncode(result) != "MPSUCCESS":
         raise Exception("Failed to obtain a sample: {}".format(result))
+
+    data = np.array(tuple(data))[channels]
 
     return data
 
@@ -257,32 +275,3 @@ def setup_mp150(dic):
     dic['connected'] = True
     
     return mpdev
-
-
-def mp150_log(log,channels,que):
-    """Creates log file for physio data
-
-    Parameters
-    ----------
-    log : str
-        Name of log file to record sampled data to
-    channels : array-like
-        What channels data is being acquired for
-    que : multiprocessing.manager.Queue()
-        To receive detected peaks/troughs from peak_finder() function
-    """
-
-    ch = ',channel'.join(str(y) for y in channels.tolist())
-    f = open(log,'a+')
-    f.write('time,channel{0}\n'.format(ch))
-    f.flush()
-    
-    while True:
-        i = que.get()
-        if i == 'kill': break
-        else:
-            sig = ','.join(str(y) for y in i[1].tolist())
-            f.write('{:0.3f},{1}\n'.format(i[0],sig))
-            f.flush()
-
-    f.close()

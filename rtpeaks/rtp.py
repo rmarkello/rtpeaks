@@ -16,11 +16,11 @@ class RTP(MP150):
 
     Methods
     -------
-    start_peak_finding()
-        Begin detection and recording of peaks; will begin recording sampled 
-        data, if not already
-    stop_peak_finding()
-        Stop detection of peaks
+    start_baseline(), stop_baseline()
+        Runs a baseline measurement and generates some approximated thresholds
+        for use in future peak detection
+    start_peak_finding(), stop_peak_finding()
+        Detects peaks/troughs in specified physiological data
 
     Usage
     -----
@@ -32,53 +32,70 @@ class RTP(MP150):
     -----
     Should _NOT_ be used interactively.
     """
-    
-    def __init__(self, log='default', samplerate=500, channels=[1,2], debug=False):
 
-        MP150.__init__(self, log, samplerate, channels)
+    def __init__(self, logfile='default', samplerate=500, channels=[1,2], debug=False):
+        """You damn well know what __init__ does"""
 
+        super(RTP,self).__init__(logfile, samplerate, channels)
+
+        self.dic['baseline'] = False
+        self.dic['debug'] = debug
         while not self.dic['connected']: pass
 
-        peak_log_file = "{}_MP150_peaks.csv".format(log)
-
         self.peak_queue = self.manager.Queue()
-        self.peak_process = mp.Process( target = peak_finder,
-                                        args = (self.sample_queue,
-                                                self.peak_queue,
-                                                self.dic['starttime'],
-                                                debug))
-        self.peak_log_process = mp.Process( target = peak_log,
-                                            args = (peak_log_file,
-                                                    self.peak_queue))
-
+        self.peak_process = mp.Process(target = rtp_finder,
+                                       args   = (self.dic,
+                                                 self.sample_queue,
+                                                 self.peak_queue))
         self.peak_process.daemon = True
-        self.peak_log_process.daemon = True
-
-    
-    def start_peak_finding(self,channel=[1],interp=False):
-        """Begin peak finding process and start logging data, if necessary"""
-
         self.peak_process.start()
-        self.peak_log_process.start()
+        
 
-        self._start_pipe(channel=channel)
+    def start_peak_finding(self, channel=[], run=None):
+        """Begin peak finding process and start logging data"""
+        
+        # start recording and turn on pipe
+        if not channel: channel = self.dic['channels'][0]
+        if len(channel) > 1: channel = channel[0]
+
+        self.start_recording(run=run)
+        self.dic['pipe'] = list(channel)
+
+        # start peak logging process
+        if run: fname = "{}-{}_MP150_peaks.csv".format(self.logfile, str(run))
+        else: fname = "{}_MP150_peaks.csv".format(self.logfile)
+
+        self.peak_log_process = mp.Process(target = rtp_log,
+                                           args   = (fname,
+                                                     self.peak_queue))
+        self.peak_log_process.daemon = True
+        self.peak_log_process.start()
 
 
     def stop_peak_finding(self):
         """Stop peak finding process"""
 
-        self._stop_pipe()
-        
-        # make sure peak logging finishes before closing the parent process...
-        while not self.peak_queue.empty(): pass
+        # turn off pipe and stop recording
+        self.dic['pipe'] = []
+        self.stop_recording()
+                
+        # ensure peak logging process quits successfully
+        self.peak_queue.put('kill')
+        self.peak_log_process.join()
 
 
     def start_baseline(self):
+        """Creates a baseline data file to generate "guess" thresholds"""
+        self.start_recording(run='baseline')
 
-        if not self.dic['record']: self.start_recording()
+
+    def stop_baseline(self):
+        """Reads in baseline data file and generates thresholds"""
+        self.stop_recording()
+        self.dic['baseline'] = True
 
 
-def peak_log(log,que):
+def rtp_log(log,que):
     """Creates log file for detected peaks/troughs
 
     Parameters
@@ -96,41 +113,50 @@ def peak_log(log,que):
     while True:
         i = que.get()
         if i == 'kill': break
-        else: 
-            f.write("{0},{1},{2},{3}\n".format(*i))
+        else:
+            sig = ','.join(str(y) for y in list(i))
+            f.write("{0}\n".format(sig))
             f.flush()
     
     f.close()
-    
 
-def peak_finder(qin,qlog,pft,debug=False):
+
+def rtp_finder(dic,pipe_que,log_que):
     """Detects peaks/troughs in real time from BioPac MP150 data
 
     Parameters
     ----------
-    qin : multiprocessing.manager.Queue()
+    dic : multiprocessing.manager.Dict()
+
+        Required input
+        --------------
+        dic['starttime']: int, time at which sampling began
+        dic['connected']: bool, continue sampling or not
+        dic['record']: boolean, save sampled data to log file
+        dic['debug']: bool, whether to print debug statements
+
+    pipe_que : multiprocessing.manager.Queue()
         Queue for receiving data from the BioPac MP150
-    qlog : multiprocessing.manager.Queue()
+    log_que : multiprocessing.manager.Queue()
         Queue to send detected peak information to peak_log() function
-    pft : int
-        Time at which data sampling began
-    debug : bool
-        Whether to print debugging statements
 
     Returns
     -------
     Imitates `p` and `t` keypress for each detected peak and trough
     """
 
-    sig = np.array(qin.get())
+    pft = dic['starttime']
+
+    # this will block until an item is available (i.e., dic['pipe'] is set)
+    sig = np.array(pipe_que.get())
+
     sig_temp = sig.copy()
     last_found = np.array([ [ 0,0,0],
                             [ 1,0,0],
                             [-1,0,0] ]*3)
 
-    while True:
-        i = qin.get()
-        if i == 'kill': break
+    while dic['connected']:
+        i = pipe_que.get()
 
         sig = np.vstack((sig,i))
         sig_temp = np.vstack((sig_temp,i))
@@ -138,7 +164,7 @@ def peak_finder(qin,qlog,pft,debug=False):
         # time received, time sent, datapoint
         to_log = (int((time.time()-pft)*1000), *i)
 
-        if debug and np.abs(for_log[0]-i[0])>1000: 
+        if dic['debug'] and np.abs(for_log[0]-i[0])>1000: 
             print("Received, sampled, data: {:>6}, {:>6}, {:>6.3f}".format(*to_log))
         
         peak, trough = peak_or_trough(sig_temp, last_found)
@@ -157,12 +183,12 @@ def peak_finder(qin,qlog,pft,debug=False):
                                     [     last,       0,0] ]*3)
 
             # tell the log file that this was forced (i.e, [x, x, x, 2])
-            qlog.put([*to_log,2])
+            if dic['record']: log_que.put([*to_log,2])
 
         # a real peak or trough
         elif (peak or trough):
             # press the required key (whatever it is)
-            if debug: print("Found {}".format("peak" if peak else "trough"))
+            if dic['debug']: print("Found {}".format("peak" if peak else "trough"))
             keypress.PressKey(0x50 if peak else 0x54)
             keypress.ReleaseKey(0x50 if peak else 0x54)
 
@@ -172,9 +198,7 @@ def peak_finder(qin,qlog,pft,debug=False):
                                      [peak, *i]) )
 
             # log it
-            qlog.put([*to_log,peak])
-    
-    qlog.put('kill')
+            if dic['record']: log_que.put([*to_log,peak])
 
 
 def peak_or_trough(signal, last_found):
