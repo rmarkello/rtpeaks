@@ -54,15 +54,19 @@ class RTP(MP150):
         """Begin peak finding process and start logging data"""
         
         # start recording and turn on pipe
-        if not channel: channel = np.where(self.dic['channels'])[0][0]
-        if isinstance(channel, (list, np.ndarray)): channel = [int(y)-1 for y in channel]
-        if len(channel) > 1: channel = channel[0]
+        if not channel: 
+            channel = np.where(self.dic['channels'])[0][0]
+        if isinstance(channel, (list, np.ndarray)): 
+            channel = [int(y)-1 for y in channel]
+            if len(channel) > 1: channel = channel[0]
+
+        if self.dic['pipe'] is not None: self.stop_peak_finding()
 
         self.start_recording(run=run)
-        self.dic['pipe'] = list(channel)
+        self.dic['pipe'] = [channel]
 
         # start peak logging process
-        if run: fname = "{}-{}_MP150_peaks.csv".format(self.logfile, str(run))
+        if run: fname = "{}-run{}_MP150_peaks.csv".format(self.logfile, str(run))
         else: fname = "{}_MP150_peaks.csv".format(self.logfile)
 
         self.peak_log_process = mp.Process(target = rtp_log,
@@ -76,7 +80,7 @@ class RTP(MP150):
         """Stop peak finding process"""
 
         # turn off pipe and stop recording
-        self.dic['pipe'] = []
+        self.dic['pipe'] = None
         self.stop_recording()
                 
         # ensure peak logging process quits successfully
@@ -93,6 +97,12 @@ class RTP(MP150):
         """Reads in baseline data file and generates thresholds"""
         self.stop_recording()
         self.dic['baseline'] = True
+
+
+    def close(self):
+        self.stop_peak_finding()
+        super(RTP,self).close()
+
 
 
 def rtp_log(log,que):
@@ -145,7 +155,6 @@ def rtp_finder(dic,pipe_que,log_que):
     Imitates `p` and `t` keypress for each detected peak and trough
     """
 
-    pft = dic['starttime']
     # this will block until an item is available (i.e., dic['pipe'] is set)
     sig = np.array(pipe_que.get())
     sig_temp = sig.copy()
@@ -161,11 +170,8 @@ def rtp_finder(dic,pipe_que,log_que):
         sig_temp = np.vstack((sig_temp,i))
 
         # time received, time sent, datapoint
-        to_log = [int((time.time()-pft)*1000)] + i
+        to_log = [int((time.time()-dic['starttime'])*1000)] + i
 
-        if dic['debug'] and np.abs(to_log[0]-i[0])>1000: 
-            print("Received, sampled, data: {:>5}, {:>5}, {:>6}".format(*to_log))
-        
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!

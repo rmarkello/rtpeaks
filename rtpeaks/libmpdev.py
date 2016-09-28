@@ -36,6 +36,7 @@ class MP150(object):
         
         self.logfile = logfile
         self.manager = mp.Manager()
+        if not isinstance(channels,(list,np.ndarray)): channels = [channels]
 
         f = {   'sampletime'    : 1000. / samplerate,
                 'newestsample'  : [0]*16,
@@ -66,7 +67,7 @@ class MP150(object):
         
         self.dic['record'] = True
 
-        if run: fname = "{}-{}_MP150_data.csv".format(self.logfile, str(run))
+        if run: fname = "{}-run{}_MP150_data.csv".format(self.logfile, str(run))
         else: fname = "{}_MP150_data.csv".format(self.logfile)
 
         self.log_process = mp.Process(target = mp150_log,
