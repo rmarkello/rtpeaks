@@ -5,8 +5,8 @@ import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
-import keypress
-from libmpdev import MP150
+import rtpeaks.keypress as keypress
+from rtpeaks.libmpdev import MP150
 
 class RTP(MP150):
     """Class for use in real-time detection of peaks and troughs
@@ -40,7 +40,6 @@ class RTP(MP150):
 
         self.dic['baseline'] = False
         self.dic['debug'] = debug
-        while not self.dic['connected']: pass
 
         self.peak_queue = self.manager.Queue()
         self.peak_process = mp.Process(target = rtp_finder,
@@ -55,7 +54,8 @@ class RTP(MP150):
         """Begin peak finding process and start logging data"""
         
         # start recording and turn on pipe
-        if not channel: channel = self.dic['channels'][0]
+        if not channel: channel = np.where(self.dic['channels'])[0][0]
+        if isinstance(channel, (list, np.ndarray)): channel = [int(y)-1 for y in channel]
         if len(channel) > 1: channel = channel[0]
 
         self.start_recording(run=run)
@@ -146,10 +146,8 @@ def rtp_finder(dic,pipe_que,log_que):
     """
 
     pft = dic['starttime']
-
     # this will block until an item is available (i.e., dic['pipe'] is set)
     sig = np.array(pipe_que.get())
-
     sig_temp = sig.copy()
     last_found = np.array([ [ 0,0,0],
                             [ 1,0,0],
@@ -157,15 +155,16 @@ def rtp_finder(dic,pipe_que,log_que):
 
     while dic['connected']:
         i = pipe_que.get()
+        if i == 'kill': break
 
         sig = np.vstack((sig,i))
         sig_temp = np.vstack((sig_temp,i))
 
         # time received, time sent, datapoint
-        to_log = (int((time.time()-pft)*1000), *i)
+        to_log = [int((time.time()-pft)*1000)] + i
 
-        if dic['debug'] and np.abs(for_log[0]-i[0])>1000: 
-            print("Received, sampled, data: {:>6}, {:>6}, {:>6.3f}".format(*to_log))
+        if dic['debug'] and np.abs(to_log[0]-i[0])>1000: 
+            print("Received, sampled, data: {:>5}, {:>5}, {:>6}".format(*to_log))
         
         peak, trough = peak_or_trough(sig_temp, last_found)
 
@@ -173,8 +172,9 @@ def rtp_finder(dic,pipe_que,log_que):
         if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 12000.: #HC
             # press the required key (whatever it is)
             last = last_found[-1,0]
-            keypress.PressKey(0x50 if last else 0x54)
-            keypress.ReleaseKey(0x50 if last else 0x54)
+            if not dic['debug']:
+                keypress.PressKey(0x50 if last else 0x54)
+                keypress.ReleaseKey(0x50 if last else 0x54)
 
             # reset everything
             sig_temp = sig[-1]
@@ -183,22 +183,23 @@ def rtp_finder(dic,pipe_que,log_que):
                                     [     last,       0,0] ]*3)
 
             # tell the log file that this was forced (i.e, [x, x, x, 2])
-            if dic['record']: log_que.put([*to_log,2])
+            if dic['record']: log_que.put(to_log + [2])
 
         # a real peak or trough
         elif (peak or trough):
             # press the required key (whatever it is)
             if dic['debug']: print("Found {}".format("peak" if peak else "trough"))
-            keypress.PressKey(0x50 if peak else 0x54)
-            keypress.ReleaseKey(0x50 if peak else 0x54)
+            if not dic['debug']:
+                keypress.PressKey(0x50 if peak else 0x54)
+                keypress.ReleaseKey(0x50 if peak else 0x54)
 
             # reset sig_temp and add to last_found
             sig_temp = sig[-1]         
             last_found = np.vstack( (last_found,
-                                     [peak, *i]) )
+                                     [peak] + i) )
 
             # log it
-            if dic['record']: log_que.put([*to_log,peak])
+            if dic['record']: log_que.put(to_log + [peak])
 
 
 def peak_or_trough(signal, last_found):

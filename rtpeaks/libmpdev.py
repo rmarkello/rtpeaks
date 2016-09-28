@@ -39,7 +39,7 @@ class MP150(object):
 
         f = {   'sampletime'    : 1000. / samplerate,
                 'newestsample'  : [0]*16,
-                'pipe'          : [],
+                'pipe'          : None,
                 'record'        : False,
                 'connected'     : False,
                 'channels'      : channels      }
@@ -55,6 +55,8 @@ class MP150(object):
         self.sample_process.daemon = True
 
         self.sample_process.start()
+
+        while not self.dic['connected']: pass
         
     
     def start_recording(self, run=None):
@@ -96,6 +98,8 @@ class MP150(object):
         self.dic['connected'] = False
         if self.dic['pipe']: self.dic['pipe'] = []
         if self.dic['record']: self.stop_recording()
+
+        self.sample_process.join()
    
 
 def mp150_log(log,channels,que):
@@ -111,7 +115,7 @@ def mp150_log(log,channels,que):
         To receive detected peaks/troughs from peak_finder() function
     """
 
-    ch = ',channel'.join(str(y) for y in channels.tolist())
+    ch = ',channel'.join(str(y+1) for y in list(np.where(channels)[0]))
     f = open(log,'a+')
     f.write('time,channel{0}\n'.format(ch))
     f.flush()
@@ -121,7 +125,7 @@ def mp150_log(log,channels,que):
         if i == 'kill': break
         else:
             sig = ','.join(str(y) for y in list(i[1]))
-            f.write('{:0.3f},{1}\n'.format(i[0],sig))
+            f.write('{0:.3f},{1}\n'.format(i[0],sig))
             f.flush()
 
     f.close()
@@ -162,28 +166,32 @@ def mp150_sample(dic,pipe_que,log_que):
     Probably best not to use dic['pipe'] if you aren't actively pulling from it
     """
 
-    mpdev = setup_mp150(mpdev,dic)
-    
-    # process samples    
+    # set up MP150 acquisition
+    mpdev = setup_mp150(dic)
+
+    # process samples
     while dic['connected']:
         data = sample_data(mpdev, dic['channels'])
-        
+        currtime = int((time.time()-dic['starttime']) * 1000)
+
         if not np.all(data == dic['newestsample']):
             dic['newestsample'] = data.copy()
-            currtime = (time.time()-dic['starttime']) * 1000
                             
             if dic['record']: 
                 log_que.put([currtime,data])
             
-            if dic['pipe']:
-                try: pipe_que.put([currtime,data[dic['pipe']]],timeout=dic['sampletime']/1000)
+            if dic['pipe'] is not None:
+                try: pipe_que.put([currtime,data[dic['pipe']][0]])
                 except: pass
     
     # close connection
     try: result = mpdev.disconnectMPDev()
     except: result = "failed to call disconnectMPDev"
-    if get_returncode(result) != "MPSUCCESS":
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
         raise Exception("Failed to close the connection: {}".format(result))
+
+    pipe_que.put('kill') # just for good measure
 
 
 def sample_data(dll,channels):
@@ -199,16 +207,15 @@ def sample_data(dll,channels):
     -------
     array (1xn) : sampled data
     """
-    
-    data = [0]*16
-    data = (c_double * len(data))(*data)
-
-    try: result = mpdev.getMostRecentSample(byref(data))
+    try: 
+        data = [0]*16
+        data = (c_double * len(data))(*data)
+        result = dll.getMostRecentSample(byref(data))
+        data = np.array(tuple(data))[channels==1]
     except: result = 0
-    if get_returncode(result) != "MPSUCCESS":
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
         raise Exception("Failed to obtain a sample: {}".format(result))
-
-    data = np.array(tuple(data))[channels]
 
     return data
 
@@ -235,8 +242,7 @@ def setup_mp150(dic):
     """
 
     # load required library
-    try: 
-        mpdev = windll.LoadLibrary('mpdev.dll')
+    try: mpdev = windll.LoadLibrary('mpdev.dll')
     except:
         f = os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll')
         try: mpdev = windll.LoadLibrary(f)
@@ -245,13 +251,15 @@ def setup_mp150(dic):
     # connect to MP150
     try: result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
     except: result = 0
-    if get_returncode(result) != "MPSUCCESS":
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
         raise Exception("Failed to connect: {}".format(result))
 
     # set sampling rate
     try: result = mpdev.setSampleRate(c_double(dic['sampletime']))
     except: result = 0
-    if get_returncode(result) != "MPSUCCESS":
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
         raise Exception("Failed to set samplerate: {}".format(result))
     
     # set acquisition channels
@@ -262,13 +270,15 @@ def setup_mp150(dic):
 
     try: result = mpdev.setAcqChannels(byref(chnls))
     except: result = 0
-    if get_returncode(result) != "MPSUCCESS":
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
         raise Exception("Failed to set channels to acquire: {}".format(result))
     
     # start acquisition
     try: result = mpdev.startAcquisition()
     except: result = 0
-    if get_returncode(result) != "MPSUCCESS":
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
         raise Exception("Failed to start acquisition: {}".format(result))
 
     dic['starttime'] = time.time()
