@@ -49,12 +49,12 @@ class MP150(object):
         
         self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
+        
         self.sample_process = mp.Process(target = mp150_sample,
                                          args   = (self.dic,
                                                    self.sample_queue,
                                                    self.log_queue)) 
         self.sample_process.daemon = True
-
         self.sample_process.start()
 
         while not self.dic['connected']: pass
@@ -160,7 +160,7 @@ def mp150_sample(dic,pipe_que,log_que):
 
     Methods
     -------
-    Can pipe data; set dic['record'] and/or dic['pipe'] True
+    Can pipe data; set dic['record'] and/or dic['pipe']
 
     Notes
     -----
@@ -185,14 +185,8 @@ def mp150_sample(dic,pipe_que,log_que):
                 try: pipe_que.put([currtime,data[dic['pipe']][0]])
                 except: pass
     
-    # close connection
-    try: result = mpdev.disconnectMPDev()
-    except: result = "failed to call disconnectMPDev"
-    result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to close the connection: {}".format(result))
-
-    pipe_que.put('kill') # just for good measure
+    shutdown_mp150(mdpev)
+    pipe_que.put('kill')
 
 
 def sample_data(dll,channels):
@@ -219,6 +213,21 @@ def sample_data(dll,channels):
         raise Exception("Failed to obtain a sample: {}".format(result))
 
     return data
+
+def shutdown_mp150(dll):
+    """Attempts to disconnect from the mpdev cleanly
+
+    Parameters
+    ----------
+    dll : from ctypes.windll.LoadLibrary()
+    """
+
+    # close connection
+    try: result = mpdev.disconnectMPDev()
+    except: result = "failed to call disconnectMPDev"
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
+        raise Exception("Failed to close the connection: {}".format(result))
 
 
 def setup_mp150(dic):

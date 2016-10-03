@@ -54,11 +54,8 @@ class RTP(MP150):
         """Begin peak finding process and start logging data"""
         
         # start recording and turn on pipe
-        if not channel: 
-            channel = np.where(self.dic['channels'])[0][0]
-        if isinstance(channel, (list, np.ndarray)): 
-            channel = [int(y)-1 for y in channel]
-            if len(channel) > 1: channel = channel[0]
+        if not channel: channel = np.where(self.dic['channels'])[0][0]
+        if isinstance(channel, (list, np.ndarray)): channel = channel[0] - 1 
 
         if self.dic['pipe'] is not None: self.stop_peak_finding()
 
@@ -171,7 +168,7 @@ def rtp_finder(dic,pipe_que,log_que):
 
         # time received, time sent, datapoint
         to_log = [int((time.time()-dic['starttime'])*1000)] + i
-
+        if to_log[0]-to_log[1] > 1000
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!
