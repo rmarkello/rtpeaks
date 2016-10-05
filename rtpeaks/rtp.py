@@ -181,9 +181,9 @@ def rtp_finder(dic,pipe_que,log_que):
 
             # reset everything
             sig_temp = sig[-1]
-            last_found = np.array([ [1 if last else 0,0,0],
-                                    [0 if last else 1,0,0],
-                                    [     last,       0,0] ]*3)
+            last_found = np.array([ [1 if last else 0, sig_temp[-1,0],   0],
+                                    [0 if last else 1, sig_temp[-1,0],   0],
+                                    [1 if last else 0, sig_temp[-1,0],   0] ]*3)
 
             # tell the log file that this was forced (i.e, [x, x, x, 2])
             if dic['record']: log_que.put(to_log + [2])
@@ -274,13 +274,6 @@ def gen_thresh(last_found,time=False):
 
     peak_height = last_found[last_found[:,0]==1,col][-3:]
     trough_height = last_found[last_found[:,0]==0,col][-3:]
-    
-    # # genuinely don't think this does anything since we're seeding `last_found`
-    # # potentially useful if we stop doing that
-    # if peak_height.size > trough_height.size:
-    #     peak_height = peak_height[peak_height.size-trough_height.size:]
-    # elif trough_height.size > peak_height.size:
-    #     trough_height = trough_height[trough_height.size-peak_height.size:]
     
     thresh = np.mean(peak_height-trough_height)
 
