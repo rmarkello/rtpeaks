@@ -9,6 +9,7 @@ import time
 import numpy as np
 import multiprocessing as mp
 from ctypes import windll, c_int, c_double, byref
+from ctypes.wintypes import DWORD
 
 def get_returncode(returncode):
     """Checks return codes from BioPac MP150 device"""
@@ -39,11 +40,12 @@ class MP150(object):
         if not isinstance(channels,(list,np.ndarray)): channels = [channels]
 
         f = {   'sampletime'    : 1000. / samplerate,
-                'newestsample'  : [0]*16,
+                'newestsample'  : np.zeros(len(channels)),
+                'newesttime'    : 0,
                 'pipe'          : None,
                 'record'        : False,
                 'connected'     : False,
-                'channels'      : channels      }
+                'channels'      : np.array(channels)      }
                 
         self.dic = self.manager.dict(f)
         
@@ -64,7 +66,6 @@ class MP150(object):
         """Begins logging sampled data"""
         
         if self.dic['record']: self.stop_recording()
-        
         self.dic['record'] = True
 
         if run: fname = "{}-run{}_MP150_data.csv".format(self.logfile, str(run))
@@ -97,7 +98,7 @@ class MP150(object):
         """Closes connection with BioPac MP150"""
 
         self.dic['connected'] = False
-        if self.dic['pipe']: self.dic['pipe'] = []
+        if self.dic['pipe'] is not None: self.dic['pipe'] = None
         if self.dic['record']: self.stop_recording()
 
         self.sample_process.join()
@@ -116,7 +117,8 @@ def mp150_log(log,channels,que):
         To receive detected peaks/troughs from peak_finder() function
     """
 
-    ch = ',channel'.join(str(y+1) for y in list(np.where(channels)[0]))
+    #!# ch = ',channel'.join(str(y+1) for y in list(np.where(channels)[0]))
+    ch = ',channel'.join(str(y+1) for y in channels)
     f = open(log,'a+')
     f.write('time,channel{0}\n'.format(ch))
     f.flush()
@@ -124,10 +126,9 @@ def mp150_log(log,channels,que):
     while True:
         i = que.get()
         if i == 'kill': break
-        else:
-            sig = ','.join(str(y) for y in list(i[1]))
-            f.write('{0:.3f},{1}\n'.format(i[0],sig))
-            f.flush()
+        sig = ','.join(str(y) for y in list(i[1]))
+        f.write('{0},{1}\n'.format(i[0],sig))
+        f.flush()
 
     f.close()
 
@@ -141,12 +142,13 @@ def mp150_sample(dic,pipe_que,log_que):
 
         Required input
         --------------
-        dic['sampletime']: float, 1000 / desired sampling rate
+        dic['sampletime']: float, msec / sample
         dic['channels']: list , specify recording channels (e.g., [1,5,7])
 
         Set by mp150_sample()
         ---------------------
-        dic['newestsample']: array, sampled data each timepoint
+        dic['newestsample']: array, most recently sampled data
+        dic['newesttime']: array, time of most recently sampled data
 
         Optionally set
         --------------
@@ -164,7 +166,8 @@ def mp150_sample(dic,pipe_que,log_que):
 
     Notes
     -----
-    Probably best not to use dic['pipe'] if you aren't actively pulling from it
+    Probably best not to use dic['pipe'] if you aren't actively pulling from
+    it, but it _shouldn't_ hurt anything if you do.
     """
 
     # set up MP150 acquisition
@@ -172,47 +175,45 @@ def mp150_sample(dic,pipe_que,log_que):
 
     # process samples
     while dic['connected']:
-        data = sample_data(mpdev, dic['channels'])
-        currtime = int((time.time()-dic['starttime']) * 1000)
+        data = receive_data(mpdev, dic['channels'])
+        currtime = dic['newesttime'] + dic['sampletime']
 
         if not np.all(data == dic['newestsample']):
-            dic['newestsample'] = data.copy()
+            dic['newestsample'], dic['newesttime'] = data.copy(), currtime
                             
-            if dic['record']: 
-                log_que.put([currtime,data])
+            if dic['record']: log_que.put([currtime,data])
             
             if dic['pipe'] is not None:
-                try: pipe_que.put([currtime,data[dic['pipe']][0]])
+                try: pipe_que.put([currtime,data[dic['pipe']]])
                 except: pass
-    
+
     shutdown_mp150(mpdev)
     pipe_que.put('kill')
 
 
-def sample_data(dll,channels):
-    """Attempts to sample data from MP150
+def receive_data(dll, channels):
+    """Receives a datapoint from the mpdev
 
     Parameters
     ----------
     dll : from ctypes.windll.LoadLibrary()
-    channels : numpy.ndarray (1x16, boolean)
-        True where acquiring channel data
-
-    Returns
-    -------
-    array (1xn) : sampled data
+    channels : array-like (1 x 16)
+        Specify recording channels [on=1, off=0]
     """
-    try: 
-        data = [0]*16
-        data = (c_double * len(data))(*data)
-        result = dll.getMostRecentSample(byref(data))
-        data = np.array(tuple(data))[channels==1]
+
+    #!# num_points = np.where(channels)[0].size
+    num_points = len(channels)
+    read = DWORD(0)
+    data = [0]*num_points
+    data = (c_double * len(data))(*data)
+    try: result = dll.receiveMPData(byref(data),DWORD(num_points),byref(read))
     except: result = 0
     result = get_returncode(result)
     if result != "MPSUCCESS":
         raise Exception("Failed to obtain a sample: {}".format(result))
 
-    return data
+    return np.array(tuple(data))
+
 
 def shutdown_mp150(dll):
     """Attempts to disconnect from the mpdev cleanly
@@ -221,6 +222,13 @@ def shutdown_mp150(dll):
     ----------
     dll : from ctypes.windll.LoadLibrary()
     """
+
+    # stop acquisition 
+    try: result = dll.stopAcquisition()
+    except: result = "failed to call stopAcquisition"
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
+        raise Exception("Failed to close the connection: {}".format(result))
 
     # close connection
     try: result = dll.disconnectMPDev()
@@ -271,11 +279,11 @@ def setup_mp150(dic):
     result = get_returncode(result)
     if result != "MPSUCCESS":
         raise Exception("Failed to set samplerate: {}".format(result))
-    
+
     # set acquisition channels
     chnls = [0]*16
     for x in dic['channels']: chnls[x-1] = 1
-    dic['channels'] = np.array(chnls)
+    #!# dic['channels'] = np.array(chnls)
     chnls = (c_int * len(chnls))(*chnls)
 
     try: result = mpdev.setAcqChannels(byref(chnls))
@@ -283,7 +291,14 @@ def setup_mp150(dic):
     result = get_returncode(result)
     if result != "MPSUCCESS":
         raise Exception("Failed to set channels to acquire: {}".format(result))
-    
+
+    # start acquisition daemon
+    try: result = mpdev.startMPAcqDaemon()
+    except: result = 0
+    result = get_returncode(result)
+    if result != "MPSUCCESS":
+        raise Exception("Failed to start acquisition: {}".format(result))
+
     # start acquisition
     try: result = mpdev.startAcquisition()
     except: result = 0

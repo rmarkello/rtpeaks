@@ -5,7 +5,7 @@ import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
-from scipy.interpolate import InterpolateUnivariateSpline
+from scipy.interpolate import InterpolatedUnivariateSpline
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -37,9 +37,19 @@ class RTP(MP150):
     def __init__(self, logfile='default', samplerate=500, channels=[1,2], debug=False):
         """You damn well know what __init__ does"""
 
-        super(RTP,self).__init__(logfile, samplerate, channels)
+        if isinstance(samplerate,(np.ndarray,list)): 
+            maxsr, samplerate = max(samplerate), list(samplerate)
+        elif isinstance(samplerate, (float,int)): 
+            maxsr, samplerate = samplerate, [samplerate]*len(channels)
+        else: raise TypeError("Check samplerate input for correct type.")
+
+        if len(samplerate) != len(channels):
+            raise ValueError("Samplerate must be length 1 or equal to len(channels).")
+
+        super(RTP,self).__init__(logfile, maxsr, channels)
 
         self.dic['baseline'] = False
+        self.dic['samplerate'] = samplerate
         self.dic['debug'] = debug
 
         self.peak_queue = self.manager.Queue()
@@ -55,13 +65,13 @@ class RTP(MP150):
         """Begin peak finding process and start logging data"""
         
         # start recording and turn on pipe
-        if not channel: channel = np.where(self.dic['channels'])[0][0]
-        if isinstance(channel, (list, np.ndarray)): channel = channel[0] - 1 
+        if not channel: channel = self.dic['channels'][0]
+        if isinstance(channel, (list, np.ndarray)): channel = channel[0] 
 
         if self.dic['pipe'] is not None: self.stop_peak_finding()
 
         self.start_recording(run=run)
-        self.dic['pipe'] = [channel]
+        self.dic['pipe'] = np.where(self.dic['channels'] == channel)[0][0]
 
         # start peak logging process
         if run: fname = "{}-run{}_MP150_peaks.csv".format(self.logfile, str(run))
@@ -93,6 +103,8 @@ class RTP(MP150):
 
     def stop_baseline(self):
         """Reads in baseline data file and generates thresholds"""
+        # or, it will once I've set this up
+        # for now, baseline does nothing
         self.stop_recording()
         self.dic['baseline'] = True
 
@@ -115,16 +127,14 @@ def rtp_log(log,que):
     """
 
     f = open(log,'a+')
-    f.write('time_detected,time_received,amplitude,peak\n')
+    f.write('time,amplitude,peak\n')
     f.flush()
     
     while True:
         i = que.get()
         if i == 'kill': break
-        else:
-            sig = ','.join(str(y) for y in list(i))
-            f.write("{0}\n".format(sig))
-            f.flush()
+        f.write("{0}\n".format(','.join(str(y) for y in list(i))))
+        f.flush()
     
     f.close()
 
@@ -138,10 +148,14 @@ def rtp_finder(dic,pipe_que,log_que):
 
         Required input
         --------------
-        dic['starttime']: int, time at which sampling began
-        dic['connected']: bool, continue sampling or not
-        dic['record']: boolean, save sampled data to log file
-        dic['debug']: bool, whether to print debug statements
+        dic['samplerate'] : list, samplerates for each channel
+        dic['connected'] : bool, continue sampling or not
+        dic['pipe'] : int, which channel is being piped
+        dic['debug'] : bool, whether to print debug statements
+
+        Optional input
+        --------------
+        dic['baseline'] : bool, whether a baseline session was run
 
     pipe_que : multiprocessing.manager.Queue()
         Queue for receiving data from the BioPac MP150
@@ -153,22 +167,24 @@ def rtp_finder(dic,pipe_que,log_que):
     Imitates `p` and `t` keypress for each detected peak and trough
     """
 
+    st = 1000./dic['samplerate'][dic['pipe']]
+
     # this will block until an item is available (i.e., dic['pipe'] is set)
-    sig = np.array(pipe_que.get())
+    sig = np.atleast_2d(np.array(pipe_que.get()))
     sig_temp = sig.copy()
     last_found = np.array([ [ 0,0,0],
                             [ 1,0,0],
                             [-1,0,0] ]*3)
 
+    if dic['baseline']: pass #get baseline estimates here
+
     while dic['connected']:
         i = pipe_que.get()
         if i == 'kill': break
+        
+        if not (i[0] >= sig_temp[-1,0] + st): continue 
 
-        sig = np.vstack((sig,i))
-        sig_temp = np.vstack((sig_temp,i))
-
-        # time received, time sent, datapoint
-        to_log = [int((time.time()-dic['starttime'])*1000)] + i
+        sig, sig_temp = np.vstack((sig,i)), np.vstack((sig_temp,i))
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!
@@ -181,13 +197,13 @@ def rtp_finder(dic,pipe_que,log_que):
                 keypress.ReleaseKey(0x54 if last else 0x50)
 
             # reset everything
-            sig_temp = sig[-1]
-            last_found = np.array([ [ 0, sig_temp[0], 0],
-                                    [ 1, sig_temp[0], 0],
-                                    [-1, sig_temp[0], 0] ]*3)
+            sig_temp = np.atleast_2d(sig[-1])
+            last_found = np.array([ [ 0, sig_temp[0,0], 0],
+                                    [ 1, sig_temp[0,0], 0],
+                                    [-1, sig_temp[0,0], 0] ]*3)
 
             # tell the log file that this was forced (i.e, [x, x, x, 2])
-            if dic['record']: log_que.put(to_log + [2])
+            log_que.put(i + [2])
 
         # a real peak or trough
         elif (peak or trough):
@@ -198,12 +214,12 @@ def rtp_finder(dic,pipe_que,log_que):
                 keypress.ReleaseKey(0x50 if peak else 0x54)
 
             # reset sig_temp and add to last_found
-            sig_temp = sig[-1]         
+            sig_temp = np.atleast_2d(sig[-1])
             last_found = np.vstack( (last_found,
                                      [peak] + i) )
 
             # log it
-            if dic['record']: log_que.put(to_log + [peak])
+            log_que.put(i + [peak])
 
 
 def peak_or_trough(signal, last_found):
