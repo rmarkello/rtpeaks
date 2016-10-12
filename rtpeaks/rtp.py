@@ -5,6 +5,7 @@ import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
+from scipy.interpolate import InterpolateUnivariateSpline
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -168,22 +169,22 @@ def rtp_finder(dic,pipe_que,log_que):
 
         # time received, time sent, datapoint
         to_log = [int((time.time()-dic['starttime'])*1000)] + i
-        if to_log[0]-to_log[1] > 1000
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!
-        if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 12000.: #HC
+        if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 7000.: #HC
             # press the required key (whatever it is)
             last = last_found[-1,0]
+            if dic['debug']: print("Forcing peak due to time.")
             if not dic['debug']:
-                keypress.PressKey(0x50 if last else 0x54)
-                keypress.ReleaseKey(0x50 if last else 0x54)
+                keypress.PressKey(0x54 if last else 0x50)
+                keypress.ReleaseKey(0x54 if last else 0x50)
 
             # reset everything
             sig_temp = sig[-1]
-            last_found = np.array([ [1 if last else 0, sig_temp[-1,0],   0],
-                                    [0 if last else 1, sig_temp[-1,0],   0],
-                                    [1 if last else 0, sig_temp[-1,0],   0] ]*3)
+            last_found = np.array([ [ 0, sig_temp[0], 0],
+                                    [ 1, sig_temp[0], 0],
+                                    [-1, sig_temp[0], 0] ]*3)
 
             # tell the log file that this was forced (i.e, [x, x, x, 2])
             if dic['record']: log_que.put(to_log + [2])
@@ -223,6 +224,7 @@ def peak_or_trough(signal, last_found):
     bool * 2 : peak, trough
     """
 
+    # let's INTERPOLATE!
     peaks = scipy.signal.argrelmax(signal[:,1],order=2)[0]
     troughs = scipy.signal.argrelmin(signal[:,1],order=2)[0]
     
@@ -234,17 +236,21 @@ def peak_or_trough(signal, last_found):
 
     # how can I functionize this?
     if peaks.size and (last_found[-1,0] != 1):
-        sh = signal[peaks[-1],1]-last_found[-1,2]
-        rh = signal[peaks[-1],0]-last_found[-1,1]
+        p = peaks[-1]
+        max_ = np.all(signal[p,1] >= signal[p-30:p,1]) #HC
+        sh = signal[p,1]-last_found[-1,2]
+        rh = signal[p,0]-last_found[-1,1]
 
-        if sh > h_thresh and rh > t_thresh:
+        if sh > h_thresh and rh > t_thresh and max_:
             return 1, 0
 
     if troughs.size and (last_found[-1,0] != 0):
-        sh = signal[troughs[-1],1]-last_found[-1,2]
-        rh = signal[troughs[-1],0]-last_found[-1,1]
+        t = troughs[-1]
+        min_ = np.all(signal[t,1] <= signal[t-30:t,1]) #HC
+        sh = signal[t,1]-last_found[-1,2]
+        rh = signal[t,0]-last_found[-1,1]
         
-        if sh < h_thresh and rh > t_thresh:
+        if sh < h_thresh and rh > t_thresh and min_:
             return 0, 1
 
     return 0, 0

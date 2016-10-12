@@ -185,7 +185,7 @@ def mp150_sample(dic,pipe_que,log_que):
                 try: pipe_que.put([currtime,data[dic['pipe']][0]])
                 except: pass
     
-    shutdown_mp150(mdpev)
+    shutdown_mp150(mpdev)
     pipe_que.put('kill')
 
 
@@ -223,7 +223,7 @@ def shutdown_mp150(dll):
     """
 
     # close connection
-    try: result = mpdev.disconnectMPDev()
+    try: result = dll.disconnectMPDev()
     except: result = "failed to call disconnectMPDev"
     result = get_returncode(result)
     if result != "MPSUCCESS":
