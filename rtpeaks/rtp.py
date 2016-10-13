@@ -5,7 +5,6 @@ import time
 import multiprocessing as mp
 import numpy as np
 import scipy.signal
-from scipy.interpolate import InterpolatedUnivariateSpline
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -37,16 +36,14 @@ class RTP(MP150):
     def __init__(self, logfile='default', samplerate=500, channels=[1,2], debug=False):
         """You damn well know what __init__ does"""
 
-        if isinstance(samplerate,(np.ndarray,list)): 
-            maxsr, samplerate = max(samplerate), list(samplerate)
-        elif isinstance(samplerate, (float,int)): 
-            maxsr, samplerate = samplerate, [samplerate]*len(channels)
-        else: raise TypeError("Check samplerate input for correct type.")
+        # check inputs
+        if not isinstance(samplerate,(float,int)): 
+            raise TypeError("Samplerate must be one of [int, float].")
+        if not isinstance(channels,(list, np.ndarray)):
+            if isinstance(channels,(int)): channels = [channels]
+            else: raise TypeError("Channels must be one of [list, array, int].")
 
-        if len(samplerate) != len(channels):
-            raise ValueError("Samplerate must be length 1 or equal to len(channels).")
-
-        super(RTP,self).__init__(logfile, maxsr, channels)
+        super(RTP,self).__init__(logfile, samplerate, channels)
 
         self.dic['baseline'] = False
         self.dic['samplerate'] = samplerate
@@ -61,21 +58,27 @@ class RTP(MP150):
         self.peak_process.start()
         
 
-    def start_peak_finding(self, channel=[], run=None):
+    def start_peak_finding(self, channel=None, samplerate=None, run=None):
         """Begin peak finding process and start logging data"""
         
-        # start recording and turn on pipe
-        if not channel: channel = self.dic['channels'][0]
-        if isinstance(channel, (list, np.ndarray)): channel = channel[0] 
+        # set peak finding channel
+        if isinstance(channel, (list, np.ndarray)): channel = channel[0]
+        else: channel = self.dic['channels'][0]
 
+        # set peak finding sample rate
+        if isinstance(samplerate, (int,float)): self.dic['samplerate'] = samplerate
+
+        # turn off peak finding if it's currently happening
         if self.dic['pipe'] is not None: self.stop_peak_finding()
 
+        # start recording and turn peak finding back on
         self.start_recording(run=run)
         self.dic['pipe'] = np.where(self.dic['channels'] == channel)[0][0]
 
         # start peak logging process
-        if run: fname = "{}-run{}_MP150_peaks.csv".format(self.logfile, str(run))
-        else: fname = "{}_MP150_peaks.csv".format(self.logfile)
+        fname = "{}_MP150_peaks.csv".format(self.logfile)
+        if run is not None:
+            fname = "{}-run{}_MP150_peaks.csv".format(self.logfile, str(run))
 
         self.peak_log_process = mp.Process(target = rtp_log,
                                            args   = (fname,
@@ -167,21 +170,20 @@ def rtp_finder(dic,pipe_que,log_que):
     Imitates `p` and `t` keypress for each detected peak and trough
     """
 
-    st = 1000./dic['samplerate'][dic['pipe']]
+    st = 1000./dic['samplerate']
+    last_found = np.array([ [ 0,0,0],
+                            [ 1,0,0],
+                            [-1,0,0] ]*3)
 
     # this will block until an item is available (i.e., dic['pipe'] is set)
     sig = np.atleast_2d(np.array(pipe_que.get()))
     sig_temp = sig.copy()
-    last_found = np.array([ [ 0,0,0],
-                            [ 1,0,0],
-                            [-1,0,0] ]*3)
 
     if dic['baseline']: pass #get baseline estimates here
 
     while dic['connected']:
         i = pipe_que.get()
         if i == 'kill': break
-        
         if not (i[0] >= sig_temp[-1,0] + st): continue 
 
         sig, sig_temp = np.vstack((sig,i)), np.vstack((sig_temp,i))
@@ -190,11 +192,11 @@ def rtp_finder(dic,pipe_que,log_que):
         # too long since a detected peak/trough!
         if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 7000.: #HC
             # press the required key (whatever it is)
-            last = last_found[-1,0]
-            if dic['debug']: print("Forcing peak due to time.")
+            if dic['debug']: 
+                print("Forcing peak due to time.")
             if not dic['debug']:
-                keypress.PressKey(0x54 if last else 0x50)
-                keypress.ReleaseKey(0x54 if last else 0x50)
+                keypress.PressKey(0x54 if last_found[-1,0] else 0x50)
+                keypress.ReleaseKey(0x54 if last_found[-1,0] else 0x50)
 
             # reset everything
             sig_temp = np.atleast_2d(sig[-1])
@@ -206,9 +208,10 @@ def rtp_finder(dic,pipe_que,log_que):
             log_que.put(i + [2])
 
         # a real peak or trough
-        elif (peak or trough):
+        elif peak or trough:
             # press the required key (whatever it is)
-            if dic['debug']: print("Found {}".format("peak" if peak else "trough"))
+            if dic['debug']: 
+                print("Found {}".format("peak" if peak else "trough"))
             if not dic['debug']:
                 keypress.PressKey(0x50 if peak else 0x54)
                 keypress.ReleaseKey(0x50 if peak else 0x54)
@@ -247,13 +250,13 @@ def peak_or_trough(signal, last_found):
     # time since last detection
     last_det = signal[-1,0] - last_found[-1,1] 
 
-    h_thresh = gen_thresh(last_found)/3             #HC
-    t_thresh = gen_thresh(last_found,time=True)/3   #HC
+    h_thresh = gen_thresh(last_found)/3                 #HC
+    t_thresh = gen_thresh(last_found,time=True)/3       #HC
 
     # how can I functionize this?
     if peaks.size and (last_found[-1,0] != 1):
         p = peaks[-1]
-        max_ = np.all(signal[p,1] >= signal[p-30:p,1]) #HC
+        max_ = np.all(signal[p,1] >= signal[p-30:p,1])  #HC
         sh = signal[p,1]-last_found[-1,2]
         rh = signal[p,0]-last_found[-1,1]
 
@@ -262,7 +265,7 @@ def peak_or_trough(signal, last_found):
 
     if troughs.size and (last_found[-1,0] != 0):
         t = troughs[-1]
-        min_ = np.all(signal[t,1] <= signal[t-30:t,1]) #HC
+        min_ = np.all(signal[t,1] <= signal[t-30:t,1])  #HC
         sh = signal[t,1]-last_found[-1,2]
         rh = signal[t,0]-last_found[-1,1]
         
