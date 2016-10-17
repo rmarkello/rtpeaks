@@ -1,12 +1,11 @@
-# realtime-peaks
-For use in the (mostly) real-time detection of physiological peaks using BioPac MP150
+# rtpeaks
+For use in the real-time detection of physiological "peaks" using BioPac MP150
 
 ## Software Requirements
-* Windows (only tested on 7)
+* Windows (tested on XP and 7)
 * Python >= 2.7
 * numpy
 * scipy
-* matplotlib
 
 Also, unfortunately, you'll need to purchase the Biopac Hardware API from [BioPac Systems](http://www.biopac.com/product/api-biopac-hardware/)...
 
@@ -17,51 +16,47 @@ Also, unfortunately, you'll need to purchase the Biopac Hardware API from [BioPa
 This is designed to work with the MP150 but could be customized to work with other BioPac systems (e.g., MP36R, MP35, MP36).
 
 ## Usage
-Making sure you've got the BioPac system set up and plugged in first.
+Making sure you've got the BioPac system set up and plugged in to the computer!
+
+First, import the relevant class and instantiate. Use the `logfile` kwarg to determine what the relevant outputs will be labelled as, `channels` to set the BioPac channels for recording, and `samplerate` to set the sampling rate.
 
 ```python
-# Import the module
-import rtpeaks
+from rtpeaks import RTP
 
-# Next, create an instance of RTP
-pf = rtpeaks.RTP(logfile = 'test', channels = [1,9], samplerate=200.)
-
-# Initiate peak/trough detection whenever you're ready. But be careful to not
-# start too soon. Once begun, the class will imitate keypresses ('p' for peaks 
-# and 't' for troughs).
-
-pf.start_peak_finding()
-
-##############################################################
-# Do all your other shenanigans / experimental procedures here
-##############################################################
-
-# Stop active peak/trough detection (keypresses will cease)
-pf.stop_peak_finding()
-
-# Stop recording data and disconnect from the BioPac
-pf.close()
-
-# Note: you can stop peak finding and still continue recording. The RTP class
-# is built on top of the MP150 class from libmpdev.py, which has a few functions
-# for recording / sampling data from the BioPac. If you want to get some post-
-# experiment physio recordings without the real-time peak detection, just wait a
-# few seconds before calling pf.close() after using pf.stop_peak_finding().
+pf = RTP(logfile = 'test', channels = [1,2], samplerate=1000.)
 ```
 
-This small chunk of code will create two files:
+Next, initiate peak and trough detection. Be careful not to start this too soon as the class will imitate keypress (`p` for peaks and `t` for troughs) when you call this method.
 
-1. A data file ('*_MP150_data.csv'), detailing 
+When calling `start_peak_finding()`, you should specify the channel that you want to use to detect peaks with the `channel` kwarg. Moreover, not all physiological signals are best sampled at high rates; for example, respiration is generally best sampled in the 50-100Hz range, while ECG is best sampled in the ~1000Hz range. If you want to detect peaks in respiration but simultaneously record ECG data at 1000Hz, you can provide the `samplerate` kwarg to this method, which will automatically downsample the incoming data. The optional kwarg `run` is used to differentiate output files (i.e., if you call this method multiple times in the same experiment, you can ensure that you have multiple output files rather than one large output file).
 
-   1. All the recorded data, and 
-   2. A timestamp for each datapoint
+```python
+pf.start_peak_finding(channel=1, samplerate=50, run=1)
+```
 
-2. A peak file ('*_MP150_peaks.csv'), detailing 
+When you're done peak finding, you can call `stop_peak_finding()` to simply stop emulating the keypresses and recording data.
 
-   1. The time each peak/trough was detected by the RTP instance,
-   2. The time it occurred in the original datastream, 
-   3. The amplitude of the peak/trough, and
-   4. Whether it was a peak (1) or trough (0)
+Then calling `close()` will disconnect the program from the BioPac device. Only call that when you are totally done with your experiment!
+
+```python
+pf.stop_peak_finding()
+pf.close()
+```
+
+This program will create two (or more) files (depending on how many times you call `start_peak_finding()`). Assuming you ran the code snippets above:
+
+1. A data file ('test_run1_MP150_data.csv'), detailing 
+
+   * All the recorded data, and 
+   * A timestamp for each datapoint
+
+2. A peak file ('test_run1_MP150_peaks.csv'), detailing 
+
+   * The time each peak/trough occurred,
+   * The amplitude of the peak/trough, and
+   * Whether it was a trough (0), peak (1), or was forced (2)
+
+With regards to the 'forced' peak: there is a time limit set for peak finding. If a peak is not found within 7 seconds, the program will assume it has somehow screwed up and will do a soft reset of itself, forcing a `p` keypress. As described, this will be noted in the output file with a `2`.
 
 ## Copyright & Disclaimers
 
