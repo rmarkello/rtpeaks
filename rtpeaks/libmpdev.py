@@ -118,7 +118,7 @@ def mp150_log(log,channels,que):
     """
 
     #!# ch = ',channel'.join(str(y+1) for y in list(np.where(channels)[0]))
-    ch = ',channel'.join(str(y+1) for y in channels)
+    ch = ',channel'.join(str(y) for y in channels)
     f = open(log,'a+')
     f.write('time,channel{0}\n'.format(ch))
     f.flush()

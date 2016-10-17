@@ -63,6 +63,7 @@ class RTP(MP150):
         
         # set peak finding channel
         if isinstance(channel, (list, np.ndarray)): channel = channel[0]
+        elif isinstance(channel, (int)): channel = channel
         else: channel = self.dic['channels'][0]
 
         # set peak finding sample rate
