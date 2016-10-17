@@ -33,7 +33,7 @@ class RTP(MP150):
     Should _NOT_ be used interactively.
     """
 
-    def __init__(self, logfile='default', samplerate=500, channels=[1,2], debug=False):
+    def __init__(self, logfile='default', samplerate=200, channels=[1,2], debug=False):
         """You damn well know what __init__ does"""
 
         # check inputs
@@ -101,7 +101,7 @@ class RTP(MP150):
 
     def start_baseline(self):
         """Creates a baseline data file to generate "guess" thresholds"""
-        self.start_recording(run='baseline')
+        self.start_recording(run='_baseline')
 
 
     def stop_baseline(self):
@@ -115,7 +115,6 @@ class RTP(MP150):
     def close(self):
         self.stop_peak_finding()
         super(RTP,self).close()
-
 
 
 def rtp_log(log,que):
@@ -140,6 +139,43 @@ def rtp_log(log,que):
         f.flush()
     
     f.close()
+
+
+def get_baseline(log, channel_loc, samplerate):
+    """Gets baseline estimates of physiological waveform
+
+    Will only be run if rtp.start_baseline()/stop_baseline() has been used; 
+    this function will import the baseline data and attempt to do a cursory 
+    peak finding on it. The data from the peak finding will be used to seed
+    initial hyper-parameters of real-time detection, including vanishing
+    thresholds and lookback value.
+
+    Parameters
+    ----------
+    log : str
+        Name for log file output
+    channel_loc : int
+        dic['pipe'] if dic['pipe'] is not None
+    samplerate : int
+        Sample rate at which rtp_finder will observe data
+    """
+    try: 
+        from peakdet import PeakFinder
+    except ImportError:
+        print("Can't load PeakFinder class; ignoring baseline data.")
+        return 
+
+    data = np.loadtxt("{}-run_baseline_MP150_data.csv".format(log),
+                        skiprows=1,
+                        usecols=[0,channel_loc+1])
+    fs = 1000./np.mean(data[1:,0]-data[:-1,0])
+
+    pf = PeakFinder(data[:,1],fs=fs)
+    pf.interpolate()
+    pf.lowpass()
+    pf.get_peaks(troughs=True)
+
+    return
 
 
 def rtp_finder(dic,pipe_que,log_que):
@@ -181,7 +217,7 @@ def rtp_finder(dic,pipe_que,log_que):
 
     if dic['baseline']: pass #get baseline estimates here
 
-    while dic['connected']:
+    while True:
         i = pipe_que.get()
         if i == 'kill': break
         if not (i[0] >= sig_temp[-1,0] + st): continue 
@@ -190,6 +226,8 @@ def rtp_finder(dic,pipe_que,log_que):
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!
+        #!# how to ensure this isn't triggered immediately at start of a new
+        #!# instruction screen (e.g., between runs)
         if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 7000.: #HC
             # press the required key (whatever it is)
             if dic['debug']: 
@@ -204,7 +242,6 @@ def rtp_finder(dic,pipe_que,log_que):
                                     [ 1, sig_temp[0,0], 0],
                                     [-1, sig_temp[0,0], 0] ]*3)
 
-            # tell the log file that this was forced (i.e, [x, x, x, 2])
             log_que.put(i + [2])
 
         # a real peak or trough
@@ -221,7 +258,6 @@ def rtp_finder(dic,pipe_que,log_que):
             last_found = np.vstack( (last_found,
                                      [peak] + i) )
 
-            # log it
             log_que.put(i + [peak])
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Thanks in large part to @esdalmaijer: https://github.com/esdalmaijer/MPy150
+Thanks to @esdalmaijer: https://github.com/esdalmaijer/MPy150
 """
 
 from __future__ import print_function, division, absolute_import
@@ -201,9 +201,7 @@ def receive_data(dll, channels):
         Specify recording channels [on=1, off=0]
     """
 
-    #!# num_points = np.where(channels)[0].size
-    num_points = len(channels)
-    read = DWORD(0)
+    num_points, read = len(channels), DWORD(0)
     data = [0]*num_points
     data = (c_double * len(data))(*data)
     try: result = dll.receiveMPData(byref(data),DWORD(num_points),byref(read))
