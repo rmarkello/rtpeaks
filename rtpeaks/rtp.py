@@ -4,7 +4,7 @@ from __future__ import print_function, division, absolute_import
 import time
 import multiprocessing as mp
 import numpy as np
-import scipy.signal
+from scipy.signal import argrelmax, argrelmin, savgol_filter
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -33,7 +33,7 @@ class RTP(MP150):
     Should _NOT_ be used interactively.
     """
 
-    def __init__(self, logfile='default', samplerate=500, channels=[1,2], debug=False):
+    def __init__(self, logfile='default', samplerate=200, channels=[1,2], debug=False):
         """You damn well know what __init__ does"""
 
         # check inputs
@@ -169,15 +169,15 @@ def rtp_finder(dic,pipe_que,log_que):
     -------
     Imitates `p` and `t` keypress for each detected peak and trough
     """
+    
+    # this will block until an item is available (i.e., dic['pipe'] is set)
+    sig = np.atleast_2d(np.array(pipe_que.get()))
+    sig_temp = sig.copy()
 
     st = 1000./dic['samplerate']
     last_found = np.array([ [ 0,0,0],
                             [ 1,0,0],
                             [-1,0,0] ]*3)
-
-    # this will block until an item is available (i.e., dic['pipe'] is set)
-    sig = np.atleast_2d(np.array(pipe_que.get()))
-    sig_temp = sig.copy()
 
     if dic['baseline']: pass #get baseline estimates here
 
@@ -187,19 +187,20 @@ def rtp_finder(dic,pipe_que,log_que):
         if not (i[0] >= sig_temp[-1,0] + st): continue 
 
         sig, sig_temp = np.vstack((sig,i)), np.vstack((sig_temp,i))
+        if sig_temp[:,1].size > 7: sig_temp[:,1] = savgol_filter(sig[:,1],7,3) #HC
         peak, trough = peak_or_trough(sig_temp, last_found)
 
         # too long since a detected peak/trough!
         if not (peak or trough) and (sig_temp[-1,0]-last_found[-1,1]) > 7000.: #HC
-            # press the required key (whatever it is)
             if dic['debug']: 
                 print("Forcing peak due to time.")
             if not dic['debug']:
-                keypress.PressKey(0x54 if last_found[-1,0] else 0x50)
-                keypress.ReleaseKey(0x54 if last_found[-1,0] else 0x50)
+                keypress.PressKey(0x50) # we always want to force a peak
+                keypress.ReleaseKey(0x50)
 
             # reset everything
-            sig_temp = np.atleast_2d(sig[-1])
+            sig = np.atleast_2d(sig[-1])
+            sig_temp = sig.copy()
             last_found = np.array([ [ 0, sig_temp[0,0], 0],
                                     [ 1, sig_temp[0,0], 0],
                                     [-1, sig_temp[0,0], 0] ]*3)
@@ -217,12 +218,16 @@ def rtp_finder(dic,pipe_que,log_que):
                 keypress.ReleaseKey(0x50 if peak else 0x54)
 
             # reset sig_temp and add to last_found
-            sig_temp = np.atleast_2d(sig[-1])
+            sig = np.atleast_2d(sig[-1])
+            sig_temp = sig.copy()
             last_found = np.vstack( (last_found,
                                      [peak] + i) )
 
             # log it
             log_que.put(i + [peak])
+
+        else:
+            log_que.put(i + [-1])
 
 
 def peak_or_trough(signal, last_found):
@@ -244,8 +249,8 @@ def peak_or_trough(signal, last_found):
     """
 
     # let's INTERPOLATE!
-    peaks = scipy.signal.argrelmax(signal[:,1],order=2)[0]
-    troughs = scipy.signal.argrelmin(signal[:,1],order=2)[0]
+    peaks = argrelmax(signal[:,1],order=2)[0]
+    troughs = argrelmin(signal[:,1],order=2)[0]
     
     # time since last detection
     last_det = signal[-1,0] - last_found[-1,1] 
