@@ -11,8 +11,20 @@ import multiprocessing as mp
 from ctypes import windll, c_int, c_double, byref
 from ctypes.wintypes import DWORD
 
+
 def get_returncode(returncode):
-    """Checks return codes from BioPac MP150 device"""
+    """
+    Checks return codes from BioPac MP150 device
+
+    Parameters
+    ----------
+    returncode : int
+        Code returned by call to BioPac mpdev.dll
+
+    Returns
+    -------
+    str : plain-text translation of returncode`
+    """
 
     errors = ['MPSUCCESS', 'MPDRVERR',   'MPDLLBUSY',
               'MPINVPARA', 'MPNOTCON',   'MPREADY',
@@ -31,7 +43,9 @@ def get_returncode(returncode):
 
 
 class MP150(object):
-    """Class to sample and record data from BioPac MP device"""
+    """
+    Class to sample and record data from BioPac MP device
+    """
 
     def __init__(self, logfile='default', samplerate=500., channels=[1,2]):
 
@@ -62,7 +76,9 @@ class MP150(object):
         while not self.dic['connected']: pass
 
     def start_recording(self, run=None):
-        """Begins logging sampled data"""
+        """
+        Begins logging sampled data
+        """
 
         if self.dic['record']: self.stop_recording()
         self.dic['record'] = True
@@ -80,7 +96,9 @@ class MP150(object):
         self.log_process.start()
 
     def stop_recording(self):
-        """Halts logging of sampled data and sends kill signal"""
+        """
+        Halts logging of sampled data and sends kill signal
+        """
 
         self.dic['record'] = False
 
@@ -88,17 +106,23 @@ class MP150(object):
         self.log_process.join()
 
     def sample(self):
-        """Returns most recently sampled datapoint"""
+        """
+        Returns most recently sampled datapoint
+        """
 
         return self.dic['newestsample']
 
     def timestamp(self):
-        """Returns timestamp of most recently sampled datapoint"""
+        """
+        Returns timestamp of most recently sampled datapoint
+        """
 
         return self.dic['newesttime']
 
     def close(self):
-        """Closes connection with BioPac MP150"""
+        """
+        Closes connection with BioPac MP150
+        """
 
         self.dic['connected'] = False
         if self.dic['pipe'] is not None: self.dic['pipe'] = None
@@ -108,7 +132,8 @@ class MP150(object):
 
 
 def mp150_log(log,channels,que):
-    """Creates log file for physio data
+    """
+    Creates log file for physio data
 
     Parameters
     ----------
@@ -136,7 +161,8 @@ def mp150_log(log,channels,que):
 
 
 def mp150_sample(dic,pipe_que,log_que):
-    """Continuously samples data from the BioPac MP150
+    """
+    Continuously samples data from the BioPac MP150
 
     Parameters
     ----------
@@ -192,8 +218,10 @@ def mp150_sample(dic,pipe_que,log_que):
     shutdown_mp150(mpdev)
     pipe_que.put('kill')
 
+
 def receive_data(dll, channels):
-    """Receives a datapoint from the mpdev
+    """
+    Receives a datapoint from the mpdev
 
     Parameters
     ----------
@@ -213,8 +241,10 @@ def receive_data(dll, channels):
 
     return np.array(tuple(data))
 
+
 def shutdown_mp150(dll):
-    """Attempts to disconnect from the mpdev cleanly
+    """
+    Attempts to disconnect from the mpdev cleanly
 
     Parameters
     ----------
@@ -235,8 +265,10 @@ def shutdown_mp150(dll):
     if result != "MPSUCCESS":
         raise Exception("Failed to close the connection: {}".format(result))
 
+
 def setup_mp150(dic):
-    """Does most of the set up for the MP150
+    """
+    Does most of the set up for the MP150
 
     Connects to MP150, sets sample rate, sets acquisition channels, and starts
     acquisiton daemon
