@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
-Totally lifted from http://stackoverflow.com/questions/13564851/generate-keyboard-events
+Totally lifted from
+http://stackoverflow.com/questions/13564851/generate-keyboard-events
 """
 
 from __future__ import print_function, division, absolute_import
 import ctypes
 from ctypes import wintypes
-import time
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 
@@ -62,17 +62,20 @@ class INPUT(ctypes.Structure):
     _fields_ = (("type",   wintypes.DWORD),
                 ("_input", _INPUT))
 
+
 LPINPUT = ctypes.POINTER(INPUT)
+
 
 def _check_count(result, func, args):
     if result == 0:
         raise ctypes.WinError(ctypes.get_last_error())
     return args
 
+
 user32.SendInput.errcheck = _check_count
-user32.SendInput.argtypes = (wintypes.UINT, # nInputs
-                             LPINPUT,       # pInputs
-                             ctypes.c_int)  # cbSize
+user32.SendInput.argtypes = (wintypes.UINT,  # nInputs
+                             LPINPUT,        # pInputs
+                             ctypes.c_int)   # cbSize
 
 # Functions
 

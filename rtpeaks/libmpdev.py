@@ -14,16 +14,16 @@ from ctypes.wintypes import DWORD
 def get_returncode(returncode):
     """Checks return codes from BioPac MP150 device"""
 
-    errors = [  'MPSUCCESS',  'MPDRVERR',    'MPDLLBUSY',
-                'MPINVPARA',  'MPNOTCON',    'MPREADY',
-                'MPWPRETRIG', 'MPWTRIG',     'MPBUSY',
-                'MPNOACTCH',  'MPCOMERR',    'MPINVTYPE',
-                'MPNOTINNET', 'MPSMPLDLERR', 'MPMEMALLOCERR',
-                'MPSOCKERR',  'MPUNDRFLOW',  'MPPRESETERR',
-                'MPPARSERERR']
-    
+    errors = ['MPSUCCESS', 'MPDRVERR',   'MPDLLBUSY',
+              'MPINVPARA', 'MPNOTCON',   'MPREADY',
+              'MPWPRETRIG','MPWTRIG',    'MPBUSY',
+              'MPNOACTCH', 'MPCOMERR',   'MPINVTYPE',
+              'MPNOTINNET','MPSMPLDLERR','MPMEMALLOCERR',
+              'MPSOCKERR', 'MPUNDRFLOW', 'MPPRESETERR',
+              'MPPARSERERR']
+
     error_codes = dict(enumerate(errors,1))
-    
+
     try: e = error_codes[returncode]
     except: e = 'n/a'
 
@@ -32,68 +32,71 @@ def get_returncode(returncode):
 
 class MP150(object):
     """Class to sample and record data from BioPac MP device"""
-    
+
     def __init__(self, logfile='default', samplerate=500., channels=[1,2]):
-        
+
         self.logfile = logfile
         self.manager = mp.Manager()
         if not isinstance(channels,(list,np.ndarray)): channels = [channels]
 
-        f = {   'sampletime'    : 1000. / samplerate,
-                'newestsample'  : np.zeros(len(channels)),
-                'newesttime'    : 0,
-                'pipe'          : None,
-                'record'        : False,
-                'connected'     : False,
-                'channels'      : np.array(channels)      }
-                
+        f = {'sampletime'   : 1000. / samplerate,
+             'newestsample' : np.zeros(len(channels)),
+             'newesttime'   : 0,
+             'pipe'         : None,
+             'record'       : False,
+             'connected'    : False,
+             'channels'     : np.array(channels)}
+
         self.dic = self.manager.dict(f)
-        
+
         self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
-        
-        self.sample_process = mp.Process(target = mp150_sample,
-                                         args   = (self.dic,
-                                                   self.sample_queue,
-                                                   self.log_queue)) 
+
+        self.sample_process = mp.Process(target=mp150_sample,
+                                         args=(self.dic,
+                                               self.sample_queue,
+                                               self.log_queue))
         self.sample_process.daemon = True
         self.sample_process.start()
 
         while not self.dic['connected']: pass
-        
-    
+
     def start_recording(self, run=None):
         """Begins logging sampled data"""
-        
+
         if self.dic['record']: self.stop_recording()
         self.dic['record'] = True
 
-        if run: fname = "{}-run{}_MP150_data.csv".format(self.logfile, str(run))
-        else: fname = "{}_MP150_data.csv".format(self.logfile)
+        if run:
+            fname = "{0}-run{1}_MP150_data.csv".format(self.logfile,str(run))
+        else:
+            fname = "{0}_MP150_data.csv".format(self.logfile)
 
-        self.log_process = mp.Process(target = mp150_log,
-                                      args   = (fname,
-                                                self.dic['channels'],
-                                                self.log_queue))
+        self.log_process = mp.Process(target=mp150_log,
+                                      args=(fname,
+                                            self.dic['channels'],
+                                            self.log_queue))
         self.log_process.daemon = True
         self.log_process.start()
 
-    
     def stop_recording(self):
         """Halts logging of sampled data and sends kill signal"""
 
         self.dic['record'] = False
-        
+
         self.log_queue.put('kill')
         self.log_process.join()
-        
 
     def sample(self):
         """Returns most recently sampled datapoint"""
 
         return self.dic['newestsample']
-    
-    
+
+    def timestamp(self):
+        """Returns timestamp of most recently sampled datapoint"""
+
+        return self.dic['newesttime']
+
     def close(self):
         """Closes connection with BioPac MP150"""
 
@@ -102,7 +105,7 @@ class MP150(object):
         if self.dic['record']: self.stop_recording()
 
         self.sample_process.join()
-   
+
 
 def mp150_log(log,channels,que):
     """Creates log file for physio data
@@ -117,12 +120,11 @@ def mp150_log(log,channels,que):
         To receive detected peaks/troughs from peak_finder() function
     """
 
-    #!# ch = ',channel'.join(str(y+1) for y in list(np.where(channels)[0]))
     ch = ',channel'.join(str(y) for y in channels)
     f = open(log,'a+')
     f.write('time,channel{0}\n'.format(ch))
     f.flush()
-    
+
     while True:
         i = que.get()
         if i == 'kill': break
@@ -132,7 +134,7 @@ def mp150_log(log,channels,que):
 
     f.close()
 
-     
+
 def mp150_sample(dic,pipe_que,log_que):
     """Continuously samples data from the BioPac MP150
 
@@ -180,16 +182,15 @@ def mp150_sample(dic,pipe_que,log_que):
 
         if not np.all(data == dic['newestsample']):
             dic['newestsample'], dic['newesttime'] = data.copy(), currtime
-                            
+
             if dic['record']: log_que.put([currtime,data])
-            
+
             if dic['pipe'] is not None:
                 try: pipe_que.put([currtime,data[dic['pipe']]])
                 except: pass
 
     shutdown_mp150(mpdev)
     pipe_que.put('kill')
-
 
 def receive_data(dll, channels):
     """Receives a datapoint from the mpdev
@@ -212,7 +213,6 @@ def receive_data(dll, channels):
 
     return np.array(tuple(data))
 
-
 def shutdown_mp150(dll):
     """Attempts to disconnect from the mpdev cleanly
 
@@ -221,7 +221,7 @@ def shutdown_mp150(dll):
     dll : from ctypes.windll.LoadLibrary()
     """
 
-    # stop acquisition 
+    # stop acquisition
     try: result = dll.stopAcquisition()
     except: result = "failed to call stopAcquisition"
     result = get_returncode(result)
@@ -234,7 +234,6 @@ def shutdown_mp150(dll):
     result = get_returncode(result)
     if result != "MPSUCCESS":
         raise Exception("Failed to close the connection: {}".format(result))
-
 
 def setup_mp150(dic):
     """Does most of the set up for the MP150
@@ -281,7 +280,6 @@ def setup_mp150(dic):
     # set acquisition channels
     chnls = [0]*16
     for x in dic['channels']: chnls[x-1] = 1
-    #!# dic['channels'] = np.array(chnls)
     chnls = (c_int * len(chnls))(*chnls)
 
     try: result = mpdev.setAcqChannels(byref(chnls))
@@ -306,5 +304,5 @@ def setup_mp150(dic):
 
     dic['starttime'] = time.time()
     dic['connected'] = True
-    
+
     return mpdev

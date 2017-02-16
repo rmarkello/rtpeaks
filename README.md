@@ -13,7 +13,7 @@ Also, unfortunately, you'll need to purchase the Biopac Hardware API from [BioPa
 * BioPac MP150
 * At least one add-on module (e.g., [RSPEC](http://www.biopac.com/product/bionomadix-rsp-with-ecg-amplifier/))
 
-This is designed to work with the MP150 but could be customized to work with other BioPac systems (e.g., MP36R, MP35, MP36).
+This is designed to work with the MP150 but could be customized to work with other BioPac systems (e.g., MP160, MP36R, MP35, MP36).
 
 ## Usage
 Making sure you've got the BioPac system set up and plugged in to the computer!
@@ -23,7 +23,7 @@ First, import the relevant class and instantiate. Use the `logfile` kwarg to det
 ```python
 from rtpeaks import RTP
 
-pf = RTP(logfile = 'test', channels = [1,2], samplerate=1000.)
+pf = RTP(logfile='test', channels=[1,2], samplerate=1000)
 ```
 
 Next, initiate peak and trough detection. Be careful not to start this too soon as the class will imitate keypress (`p` for peaks and `t` for troughs) when you call this method.

@@ -1,4 +1,5 @@
-"""rtpeaks
+"""
+rtpeaks
 """
 
 __all__ = ['keypress','libmpdev','rtp','__version__']
