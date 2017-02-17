@@ -244,10 +244,10 @@ def get_baseline(log, channel_loc, samplerate):
 
     pi = np.hstack((np.ones([p.size,1]),
                     np.atleast_2d(data[p,0]).T,
-                    np.atleast_2d(data[p,channel_loc+1]).T))
+                    np.atleast_2d(data[p,1]).T))
     ti = np.hstack((np.zeros([t.size,1]),
                     np.atleast_2d(data[t,0]).T,
-                    np.atleast_2d(data[t,channel_loc+1]).T))
+                    np.atleast_2d(data[t,1]).T))
 
     out = np.vstack((pi,ti))
     out = out[np.argsort(out[:,1])]
@@ -359,8 +359,8 @@ def peak_or_trough(signal, last_found):
     bool, bool : peak detected, trough detected
     """
 
-    peaks = argrelmax(signal[:,1],order=2)[0]
-    troughs = argrelmin(signal[:,1],order=2)[0]
+    peaks = get_extrema(signal[:,1])
+    troughs = get_extrema(signal[:,1],peaks=False)
 
     # generate thresholds
     h_thresh, h_ci = gen_thresh(last_found)
@@ -431,3 +431,38 @@ def gen_thresh(last_found,time=False):
 
     if not time: return thresh, np.sqrt(variance)*2.5
     else: return np.abs(thresh), np.sqrt(variance)*2.5
+
+
+def get_extrema(data, peaks=True, thresh=0):
+    """
+    Find extrema in `data` by changes in sign of first derivative
+
+    Parameters
+    ----------
+    data : array-like
+    peaks : bool
+        Whether to look for peaks (True) or troughs (False)
+    thresh : float (0,1)
+
+    Returns
+    -------
+    array : indices of extrema from `data`
+    """
+
+    if thresh < 0 or thresh > 1: raise ValueError("Thresh must be in (0,1).")
+
+    if peaks: Indx = np.where(data > data.max()*thresh)[0]
+    else: Indx = np.where(data < data.min()*thresh)[0]
+
+    trend = np.sign(np.diff(data))
+    idx = np.where(trend==0)[0]
+
+    # get only peaks, and fix flat peaks
+    for i in range(idx.size-1,-1,-1):
+        if trend[min(idx[i]+1,trend.size)-1]>=0: trend[idx[i]] = 1
+        else: trend[idx[i]] = -1
+
+    if peaks: idx = np.where(np.diff(trend)==-2)[0]+1
+    else: idx = np.where(np.diff(trend)==2)[0]+1
+
+    return np.intersect1d(Indx,idx)
