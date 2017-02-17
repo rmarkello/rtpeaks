@@ -25,6 +25,7 @@ MAPVK_VK_TO_VSC = 0
 
 wintypes.ULONG_PTR = wintypes.WPARAM
 
+
 class MOUSEINPUT(ctypes.Structure):
     _fields_ = (("dx",          wintypes.LONG),
                 ("dy",          wintypes.LONG),
@@ -32,6 +33,7 @@ class MOUSEINPUT(ctypes.Structure):
                 ("dwFlags",     wintypes.DWORD),
                 ("time",        wintypes.DWORD),
                 ("dwExtraInfo", wintypes.ULONG_PTR))
+
 
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = (("wVk",         wintypes.WORD),
@@ -48,10 +50,12 @@ class KEYBDINPUT(ctypes.Structure):
             self.wScan = user32.MapVirtualKeyExW(self.wVk,
                                                  MAPVK_VK_TO_VSC, 0)
 
+
 class HARDWAREINPUT(ctypes.Structure):
     _fields_ = (("uMsg",    wintypes.DWORD),
                 ("wParamL", wintypes.WORD),
                 ("wParamH", wintypes.WORD))
+
 
 class INPUT(ctypes.Structure):
     class _INPUT(ctypes.Union):
@@ -77,14 +81,11 @@ user32.SendInput.argtypes = (wintypes.UINT,  # nInputs
                              LPINPUT,        # pInputs
                              ctypes.c_int)   # cbSize
 
-# Functions
 
 def PressKey(hexKeyCode):
     x = INPUT(type=INPUT_KEYBOARD,
               ki=KEYBDINPUT(wVk=hexKeyCode))
     user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-
-def ReleaseKey(hexKeyCode):
     x = INPUT(type=INPUT_KEYBOARD,
               ki=KEYBDINPUT(wVk=hexKeyCode,
                             dwFlags=KEYEVENTF_KEYUP))

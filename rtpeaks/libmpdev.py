@@ -26,12 +26,12 @@ def get_returncode(returncode):
     str : plain-text translation of returncode`
     """
 
-    errors = ['MPSUCCESS', 'MPDRVERR',   'MPDLLBUSY',
-              'MPINVPARA', 'MPNOTCON',   'MPREADY',
-              'MPWPRETRIG','MPWTRIG',    'MPBUSY',
-              'MPNOACTCH', 'MPCOMERR',   'MPINVTYPE',
-              'MPNOTINNET','MPSMPLDLERR','MPMEMALLOCERR',
-              'MPSOCKERR', 'MPUNDRFLOW', 'MPPRESETERR',
+    errors = ['MPSUCCESS',  'MPDRVERR',   'MPDLLBUSY',
+              'MPINVPARA',  'MPNOTCON',   'MPREADY',
+              'MPWPRETRIG', 'MPWTRIG',    'MPBUSY',
+              'MPNOACTCH',  'MPCOMERR',   'MPINVTYPE',
+              'MPNOTINNET', 'MPSMPLDLERR','MPMEMALLOCERR',
+              'MPSOCKERR',  'MPUNDRFLOW', 'MPPRESETERR',
               'MPPARSERERR']
 
     error_codes = dict(enumerate(errors,1))
@@ -78,6 +78,11 @@ class MP150(object):
     def start_recording(self, run=None):
         """
         Begins logging sampled data
+
+        Parameters
+        ----------
+        run : str
+            To differentiate name of output file
         """
 
         if self.dic['record']: self.stop_recording()
@@ -131,27 +136,27 @@ class MP150(object):
         self.sample_process.join()
 
 
-def mp150_log(log,channels,que):
+def mp150_log(fname,channels,log_queue):
     """
     Creates log file for physio data
 
     Parameters
     ----------
-    log : str
+    fname : str
         Name of log file to record sampled data to
     channels : array-like
         What channels data is being acquired for
-    que : multiprocessing.manager.Queue()
+    log_queue : multiprocessing.manager.Queue()
         To receive detected peaks/troughs from peak_finder() function
     """
 
     ch = ',channel'.join(str(y) for y in channels)
-    f = open(log,'a+')
+    f = open(fname,'a+')
     f.write('time,channel{0}\n'.format(ch))
     f.flush()
 
     while True:
-        i = que.get()
+        i = log_queue.get()
         if i == 'kill': break
         sig = ','.join(str(y) for y in list(i[1]))
         f.write('{0},{1}\n'.format(i[0],sig))
@@ -160,7 +165,7 @@ def mp150_log(log,channels,que):
     f.close()
 
 
-def mp150_sample(dic,pipe_que,log_que):
+def mp150_sample(dic,sample_queue,log_queue):
     """
     Continuously samples data from the BioPac MP150
 
@@ -183,9 +188,9 @@ def mp150_sample(dic,pipe_que,log_que):
         dic['record']: boolean, save sampled data to log file
         dic['pipe']: list-of-int, send specified data channels to queue
 
-    pipe_que : multiprocessing.manager.Queue()
+    sample_queue : multiprocessing.manager.Queue()
         Queue to send sampled data for use by another process
-    log_que : multiprocessing.manager.Queue()
+    log_queue : multiprocessing.manager.Queue()
         Queue to send sampled data to mp150_log() function
 
     Methods
@@ -209,14 +214,14 @@ def mp150_sample(dic,pipe_que,log_que):
         if not np.all(data == dic['newestsample']):
             dic['newestsample'], dic['newesttime'] = data.copy(), currtime
 
-            if dic['record']: log_que.put([currtime,data])
+            if dic['record']: log_queue.put([currtime,data])
 
             if dic['pipe'] is not None:
-                try: pipe_que.put([currtime,data[dic['pipe']]])
+                try: sample_queue.put([currtime,data[dic['pipe']]])
                 except: pass
 
     shutdown_mp150(mpdev)
-    pipe_que.put('kill')
+    sample_queue.put('kill')
 
 
 def receive_data(dll, channels):
