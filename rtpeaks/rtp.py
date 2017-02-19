@@ -3,7 +3,6 @@
 from __future__ import print_function, division, absolute_import
 import multiprocessing as mp
 import numpy as np
-from scipy.signal import argrelmax, argrelmin
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -234,8 +233,14 @@ def get_baseline(log, channel_loc, samplerate):
                       usecols=[0,channel_loc+1])
     fs = 1000./np.mean(np.diff(data[:,0]))  # sampling rate of MP150
 
-    pf = PeakFinder(data[:,1],fs=fs)
-    if fs != 1000: pf.interpolate(np.floor(1000/fs))  # interpolate to 1000 Hz
+    # downsample data if necessary
+    if samplerate < fs:
+        indata = data[np.arange(0,data.shape[0],1000/samplerate,dtype='int64')]
+    else:
+        indata = data.copy()
+
+    pf = PeakFinder(indata[:,1],fs=samplerate)
+    if pf.fs != 1000: pf.interpolate(np.floor(1000/pf.fs))
     pf.get_peaks(thresh=0.2)
 
     size = np.min([pf.troughinds.size,pf.peakinds.size])
@@ -255,7 +260,7 @@ def get_baseline(log, channel_loc, samplerate):
     return out
 
 
-def rtp_finder(dic,pipe_que,log_que):
+def rtp_finder(dic,sample_queue,peak_queue):
     """
     Detects peaks/troughs in real time from BioPac MP150 data
 
@@ -266,17 +271,16 @@ def rtp_finder(dic,pipe_que,log_que):
         Required input
         --------------
         dic['samplerate'] : list, samplerates for each channel
-        dic['connected'] : bool, continue sampling or not
-        dic['pipe'] : int, which channel is being piped
         dic['debug'] : bool, whether to print debug statements
 
         Optional input
         --------------
         dic['baseline'] : bool, whether a baseline session was run
+        dic['log'] : str, name of logfile (required if dic['baseline'] is set)
 
-    pipe_que : multiprocessing.manager.Queue()
+    sample_queue : multiprocessing.manager.Queue()
         Queue for receiving data from the BioPac MP150
-    log_que : multiprocessing.manager.Queue()
+    peak_queue : multiprocessing.manager.Queue()
         Queue to send detected peak information to peak_log() function
 
     Returns
@@ -285,10 +289,9 @@ def rtp_finder(dic,pipe_que,log_que):
     """
 
     # this will block until an item is available (i.e., dic['pipe'] is set)
-    sig = np.atleast_2d(np.array(pipe_que.get()))
-    sig_temp = sig.copy()
+    sig = np.atleast_2d(np.array(sample_queue.get()))
 
-    last_found = np.array([[ 0,0,0],[ 1,0,0],[-1,0,0]]*2)
+    last_found = np.array([[0,0,0],[1,0,0],[-1,0,0]]*2)
 
     if dic['baseline']:
         out = get_baseline(dic['log'],
@@ -296,48 +299,41 @@ def rtp_finder(dic,pipe_que,log_que):
                            dic['samplerate'])
         last_found = out.copy()
 
-        sig = np.atleast_2d(np.array(pipe_que.get()))
-        sig_temp = sig.copy()
+        sig = np.atleast_2d(np.array(sample_queue.get()))
+        last_found = np.vstack((last_found,
+                                [-1,sig[-1,0],last_found[-1,2]]))
 
     st = 1000./dic['samplerate']
 
     while True:
-        i = pipe_que.get()
+        i = sample_queue.get()
         if i == 'kill': break
-        if i == 'break': pass  # somehow make this ensure forced peaks real
-        if not (i[0] >= sig_temp[-1,0] + st): continue
+        if i == 'break': continue  # somehow make this ensure forced peaks real
+        if i[0] < sig[-1,0] + st: continue
 
-        sig, sig_temp = np.vstack((sig,i)), np.vstack((sig_temp,i))
-        peak, trough = peak_or_trough(sig_temp, last_found)
+        sig = np.vstack((sig,i))
+        peak, trough = peak_or_trough(sig, last_found)
 
-        # too long since a detected peak/trough!
-        avgrate, stdrate = gen_thresh(last_found,time=True)
-        lasttime = sig_temp[-1,0]-last_found[-1,1]
-        if not (peak or trough) and (lasttime > avgrate+stdrate):
-            if dic['debug']: print("Forcing peak due to time.")
-            if not dic['debug']: keypress.PressKey(0x50)  # always force a peak
+        if peak or trough:
+            # get index of extrema
+            if peak: ex = get_extrema(sig[:,1])[-1]
+            else: ex = get_extrema(sig[:,1],peaks=False)[-1]
 
-            # reset everything
-            sig_temp = np.atleast_2d(sig[-1])
-            if dic['baseline']: last_found = out.copy()
-            else: last_found = np.array([[ 0,sig_temp[0,0],0],
-                                         [ 1,sig_temp[0,0],0],
-                                         [-1,sig_temp[0,0],0]]*2)
-
-            log_que.put(i + [2])
-
-        # a real peak or trough
-        elif peak or trough:
-            # press the required key (whatever it is)
-            if dic['debug']: print("Found {}".format(['trough','peak'][peak]))
-            if not dic['debug']: keypress.PressKey(0x50 if peak else 0x54)
-
-            # reset sig_temp and add to last_found
-            sig_temp = np.atleast_2d(sig[-1])
+            # add to last_found
             last_found = np.vstack((last_found,
-                                    [int(peak)] + i))
+                                    np.append([int(peak)], sig[ex])))
 
-            log_que.put(i + [int(peak)])
+            # if extrema was detected "immediately" then log detection
+            if ex == len(sig)-2:
+                if dic['debug']:
+                    print("Found {}".format('peak' if peak else 'trough'))
+                if not dic['debug']:
+                    keypress.PressKey(0x50 if peak else 0x54)
+
+                peak_queue.put(np.append(sig[-1], [int(peak)]))
+
+            # reset sig
+            sig = np.atleast_2d(sig[-1])
 
 
 def peak_or_trough(signal, last_found):
@@ -359,40 +355,46 @@ def peak_or_trough(signal, last_found):
     bool, bool : peak detected, trough detected
     """
 
-    peaks = get_extrema(signal[:,1])
-    troughs = get_extrema(signal[:,1],peaks=False)
-
-    # generate thresholds
+    # generate thresholds and confidence intervals
     h_thresh, h_ci = gen_thresh(last_found)
     t_thresh, t_ci = gen_thresh(last_found,time=True)
 
     # only accept CI if at least 20 samples
     if last_found.shape[0] < 20: h_ci, t_ci = h_thresh/2, t_thresh/2
 
-    # how many samples between detections
+    # if time since last det > upper bound of normal time interval
+    # shrink height threshold by relative factor
+    divide = (signal[-1,0]-last_found[-1,1])/(t_thresh+t_ci)
+    if divide > 1: h_thresh /= divide
+
+    # approximate # of samples between detections
     fs = np.mean(np.diff(signal[:,0]))
     avgrate = int(np.floor(t_thresh/fs - t_ci/fs))
-    if avgrate < 0: avgrate = 1
+    if avgrate < 0: avgrate = 1  # if negative, let's just look 1 back
 
-    if peaks.size and (last_found[-1,0] != 1):
-        p = peaks[-1]
-        # ensure peak is higher than previous `avgrate` datapoints
-        max_ = np.all(signal[p,1] >= signal[p-avgrate:p,1])
-        sh = signal[p,1]-last_found[-1,2]
-        rh = signal[p,0]-last_found[-1,1]
+    if last_found[-1,0] != 1:  # if we're looking for a peak
+        peaks = get_extrema(signal[:,1])
+        if len(peaks) > 0:
+            p = peaks[-1]
+            # ensure peak is higher than previous `avgrate` datapoints
+            max_ = np.all(signal[p,1] >= signal[p-avgrate:p,1])
+            sh = signal[p,1]-last_found[-1,2]
+            rh = signal[p,0]-last_found[-1,1]
 
-        if sh > h_thresh-h_ci and rh > t_thresh-t_ci and max_:
-            return True, False
+            if sh > h_thresh-h_ci and rh > t_thresh-t_ci and max_:
+                return True, False
 
-    if troughs.size and (last_found[-1,0] != 0):
-        t = troughs[-1]
-        # ensure trough is lower than previous `avgrate` datapoints
-        min_ = np.all(signal[t,1] <= signal[t-avgrate:t,1])
-        sh = signal[t,1]-last_found[-1,2]
-        rh = signal[t,0]-last_found[-1,1]
+    if last_found[-1,0] != 0:  # if we're looking for a trough
+        troughs = get_extrema(signal[:,1],peaks=False)
+        if len(troughs) > 0:
+            t = troughs[-1]
+            # ensure trough is lower than previous `avgrate` datapoints
+            min_ = np.all(signal[t,1] <= signal[t-avgrate:t,1])
+            sh = signal[t,1]-last_found[-1,2]
+            rh = signal[t,0]-last_found[-1,1]
 
-        if sh < h_thresh+h_ci and rh > t_thresh-t_ci and min_:
-            return False, True
+            if sh < h_thresh+h_ci and rh > t_thresh-t_ci and min_:
+                return False, True
 
     return False, False
 
@@ -423,14 +425,19 @@ def gen_thresh(last_found,time=False):
 
     size = np.min([peaks.size,troughs.size])
     dist = peaks[-size:]-troughs[-size:]
-    weights = np.power(range(1,size+1),5)  # exponential weighting
 
-    thresh = np.average(dist, weights=weights)
-    variance = np.average((dist-thresh)**2, weights=weights)
-    variance = (variance*dist.size)/(dist.size-1)  # unbiased variance
+    # get rid of gross outliers (likely caused by pauses in peak finding)
+    dist = dist[np.where(np.logical_and(dist<dist.mean()+dist.std()*5,
+                                        dist>dist.mean()-dist.std()*5))[0]]
 
-    if not time: return thresh, np.sqrt(variance)*2.5
-    else: return np.abs(thresh), np.sqrt(variance)*2.5
+    weights = np.power(range(1,dist.size+1),5)  # exponential weighting
+
+    thresh = np.average(dist, weights=weights)  # weighted avg
+    variance = np.average((dist-thresh)**2, weights=weights)*dist.size
+    stdev = np.sqrt(variance/(dist.size-1))*2.5  # weighted std (unbiased)
+
+    if not time: return thresh, stdev
+    else: return np.abs(thresh), stdev
 
 
 def get_extrema(data, peaks=True, thresh=0):
@@ -451,6 +458,8 @@ def get_extrema(data, peaks=True, thresh=0):
 
     if thresh < 0 or thresh > 1: raise ValueError("Thresh must be in (0,1).")
 
+    data = normalize(data)
+
     if peaks: Indx = np.where(data > data.max()*thresh)[0]
     else: Indx = np.where(data < data.min()*thresh)[0]
 
@@ -466,3 +475,20 @@ def get_extrema(data, peaks=True, thresh=0):
     else: idx = np.where(np.diff(trend)==2)[0]+1
 
     return np.intersect1d(Indx,idx)
+
+
+def normalize(data):
+    """
+    Normalizes `data` (subtracts mean and divides by std)
+
+    Parameters
+    ----------
+    data : array-like
+
+    Returns
+    -------
+    array: normalized data
+    """
+
+    if data.ndim > 1: raise IndexError("Input must be one-dimensional.")
+    return (data - data.mean()) / data.std()
