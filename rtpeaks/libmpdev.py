@@ -37,7 +37,7 @@ def get_returncode(returncode):
     error_codes = dict(enumerate(errors,1))
 
     try: e = error_codes[returncode]
-    except: e = 'n/a'
+    except: e = returncode
 
     return e
 
@@ -110,16 +110,18 @@ class MP150(object):
         self.log_queue.put('kill')
         self.log_process.join()
 
+    @property
     def sample(self):
         """
-        Returns most recently sampled datapoint
+        Most recently sampled datapoint
         """
 
         return self.dic['newestsample']
 
+    @property
     def timestamp(self):
         """
-        Returns timestamp of most recently sampled datapoint
+        Timestamp of most recently sampled datapoint
         """
 
         return self.dic['newesttime']
@@ -217,11 +219,11 @@ def mp150_sample(dic,sample_queue,log_queue):
             if dic['record']: log_queue.put([currtime,data])
 
             if dic['pipe'] is not None:
-                try: sample_queue.put([currtime,data[dic['pipe']]])
-                except: pass
+                try: sample_queue.put_nowait([currtime,data[dic['pipe']]])
+                except mp.queues.Full: pass
 
-    shutdown_mp150(mpdev)
     sample_queue.put('kill')
+    shutdown_mp150(mpdev)
 
 
 def receive_data(dll, channels):
@@ -289,7 +291,6 @@ def setup_mp150(dic):
 
         Set by mp150_sample()
         ---------------------
-        dic['starttime']: int, time at which sampling begins
         dic['connected']: boolean, continue sampling or not
     """
 
@@ -330,7 +331,7 @@ def setup_mp150(dic):
     except: result = 0
     result = get_returncode(result)
     if result != "MPSUCCESS":
-        raise Exception("Failed to start acquisition: {}".format(result))
+        raise Exception("Failed to start acq daemon: {}".format(result))
 
     # start acquisition
     try: result = mpdev.startAcquisition()
@@ -339,7 +340,6 @@ def setup_mp150(dic):
     if result != "MPSUCCESS":
         raise Exception("Failed to start acquisition: {}".format(result))
 
-    dic['starttime'] = time.time()
     dic['connected'] = True
 
     return mpdev

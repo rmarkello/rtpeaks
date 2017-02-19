@@ -17,8 +17,7 @@ class RTP(MP150):
     Methods
     -------
     start_baseline(), stop_baseline()
-        Runs a baseline measurement and generates some approximated thresholds
-        for use in future peak detection
+        Runs a baseline measurement -- highly recommended!!
     start_peak_finding(), stop_peak_finding()
         Detects peaks/troughs in specified physiological data
 
@@ -80,7 +79,8 @@ class RTP(MP150):
         Parameters
         ----------
         channel : int
-            Channel for peak finding
+            Channel for peak finding; must be one of channels set at
+            instantiation.
         samplerate : float
             Samplerate at which `channel` should be searched for peaks/troughs.
             Will appropriately downsample data, if desired.
@@ -94,7 +94,7 @@ class RTP(MP150):
 
         # set peak finding channel
         if isinstance(channel, (list, np.ndarray)): channel = channel[0]
-        elif isinstance(channel, (int)): channel = channel
+        elif isinstance(channel, (int)): pass
         else: channel = self.dic['channels'][0]
 
         # set peak finding sample rate
@@ -109,9 +109,10 @@ class RTP(MP150):
         self.dic['pipe'] = np.where(self.dic['channels'] == channel)[0][0]
 
         # start peak logging process
-        fname = "{}_MP150_peaks.csv".format(self.logfile)
         if run is not None:
             fname = "{}-run{}_MP150_peaks.csv".format(self.logfile, str(run))
+        else:
+            fname = "{}_MP150_peaks.csv".format(self.logfile)
 
         self.peak_log_process = mp.Process(target=rtp_log,
                                            args=(fname,self.peak_queue))
@@ -134,7 +135,7 @@ class RTP(MP150):
         self.peak_queue.put('kill')
         self.peak_log_process.join()
 
-    def start_baseline(self, channel=None):
+    def start_baseline(self, channel, samplerate):
         """
         Creates a baseline data file
 
@@ -146,6 +147,8 @@ class RTP(MP150):
         ----------
         channel : int
             Channel that peak finding will occur on
+        samplerate : float
+            Samplerate at which to search data for peaks/troughs
         """
 
         self.start_recording(run='_baseline')
@@ -212,7 +215,7 @@ def get_baseline(log, channel_loc, samplerate):
     log : str
         RTP.logfile
     channel_loc : int
-        dic['pipe']
+        Channel that peak finding is supposed to occur on
     samplerate : int
         dic['samplerate']
 
@@ -276,7 +279,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
         Optional input
         --------------
         dic['baseline'] : bool, whether a baseline session was run
-        dic['log'] : str, name of logfile (required if dic['baseline'] is set)
+        dic['log'] : str, name of logfile (required if dic['baseline'])
 
     sample_queue : multiprocessing.manager.Queue()
         Queue for receiving data from the BioPac MP150
@@ -290,7 +293,6 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
     # this will block until an item is available (i.e., dic['pipe'] is set)
     sig = np.atleast_2d(np.array(sample_queue.get()))
-
     last_found = np.array([[0,0,0],[1,0,0],[-1,0,0]]*2)
 
     if dic['baseline']:
@@ -368,7 +370,7 @@ def peak_or_trough(signal, last_found):
     if divide > 1: h_thresh /= divide
 
     # approximate # of samples between detections
-    fs = np.mean(np.diff(signal[:,0]))
+    fs = np.diff(signal[:,0]).mean()
     avgrate = int(np.floor(t_thresh/fs - t_ci/fs))
     if avgrate < 0: avgrate = 1  # if negative, let's just look 1 back
 
@@ -449,7 +451,7 @@ def get_extrema(data, peaks=True, thresh=0):
     data : array-like
     peaks : bool
         Whether to look for peaks (True) or troughs (False)
-    thresh : float (0,1)
+    thresh : float [0,1]
 
     Returns
     -------
@@ -491,4 +493,7 @@ def normalize(data):
     """
 
     if data.ndim > 1: raise IndexError("Input must be one-dimensional.")
-    return (data - data.mean()) / data.std()
+
+    if data.size == 1: return data
+    if data.std() == 0: return data - data.mean()
+    else: return (data - data.mean()) / data.std()
