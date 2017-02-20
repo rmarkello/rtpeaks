@@ -302,8 +302,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
         last_found = out.copy()
 
         sig = np.atleast_2d(np.array(sample_queue.get()))
-        last_found = np.vstack((last_found,
-                                [-1,sig[-1,0],last_found[-1,2]]))
+        last_found[-1,1] = sig[0,0] - gen_thresh(last_found[:-1],time=True)[0]
 
     st = 1000./dic['samplerate']
 
@@ -318,8 +317,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
         if peak or trough:
             # get index of extrema
-            if peak: ex = get_extrema(sig[:,1])[-1]
-            else: ex = get_extrema(sig[:,1],peaks=False)[-1]
+            ex = get_extrema(sig[:,1],peaks=peak)[-1]
 
             # add to last_found
             last_found = np.vstack((last_found,
@@ -329,7 +327,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
             if ex == len(sig)-2:
                 if dic['debug']:
                     print("Found {}".format('peak' if peak else 'trough'))
-                if not dic['debug']:
+                else:
                     keypress.PressKey(0x50 if peak else 0x54)
 
                 peak_queue.put(np.append(sig[-1], [int(peak)]))
@@ -358,8 +356,8 @@ def peak_or_trough(signal, last_found):
     """
 
     # generate thresholds and confidence intervals
-    h_thresh, h_ci = gen_thresh(last_found)
-    t_thresh, t_ci = gen_thresh(last_found,time=True)
+    h_thresh, h_ci = gen_thresh(last_found[:-1])
+    t_thresh, t_ci = gen_thresh(last_found[:-1],time=True)
 
     # only accept CI if at least 20 samples
     if last_found.shape[0] < 20: h_ci, t_ci = h_thresh/2, t_thresh/2
@@ -372,7 +370,7 @@ def peak_or_trough(signal, last_found):
     # approximate # of samples between detections
     fs = np.diff(signal[:,0]).mean()
     avgrate = int(np.floor(t_thresh/fs - t_ci/fs))
-    if avgrate < 0: avgrate = 1  # if negative, let's just look 1 back
+    if avgrate < 0: avgrate = 5  # if negative, let's just look 5 back
 
     if last_found[-1,0] != 1:  # if we're looking for a peak
         peaks = get_extrema(signal[:,1])
@@ -395,7 +393,7 @@ def peak_or_trough(signal, last_found):
             sh = signal[t,1]-last_found[-1,2]
             rh = signal[t,0]-last_found[-1,1]
 
-            if sh < h_thresh+h_ci and rh > t_thresh-t_ci and min_:
+            if sh < -h_thresh+h_ci and rh > t_thresh-t_ci and min_:
                 return False, True
 
     return False, False
@@ -429,8 +427,8 @@ def gen_thresh(last_found,time=False):
     dist = peaks[-size:]-troughs[-size:]
 
     # get rid of gross outliers (likely caused by pauses in peak finding)
-    dist = dist[np.where(np.logical_and(dist<dist.mean()+dist.std()*5,
-                                        dist>dist.mean()-dist.std()*5))[0]]
+    dist = dist[np.where(np.logical_and(dist<dist.mean()+dist.std()*3,
+                                        dist>dist.mean()-dist.std()*3))[0]]
 
     weights = np.power(range(1,dist.size+1),5)  # exponential weighting
 
