@@ -1,5 +1,3 @@
 *.pyc
 .DS_Store
-plot_data.py
 rtpeaks/mpdev.dll
-help

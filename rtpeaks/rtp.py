@@ -268,13 +268,10 @@ def rtp_finder(dic,sample_queue,peak_queue):
     ----------
     dic : multiprocessing.manager.Dict()
 
-        Required input
+        Input
         --------------
         dic['samplerate'] : list, samplerates for each channel
         dic['debug'] : bool, whether to print debug statements
-
-        Optional input
-        --------------
         dic['baseline'] : bool, whether a baseline session was run
         dic['log'] : str, name of logfile (required if dic['baseline'])
 
@@ -288,18 +285,20 @@ def rtp_finder(dic,sample_queue,peak_queue):
     Imitates `p` and `t` keypress for each detected peak and trough
     """
 
-    # this will block until an item is available (i.e., dic['pipe'] is set)
+    # this will block until an item is available in sample_queue
+    # i.e., dic['pipe'] is set
     sig = np.atleast_2d(np.array(sample_queue.get()))
     last_found = np.array([[0,0,0],[1,0,0],[-1,0,0]]*2)
 
     if dic['baseline']:
-        out = get_baseline(dic['log'],
-                           sig[-1,1],
-                           dic['samplerate'])
+        out = get_baseline(dic['log'],sig[-1,1],dic['samplerate'])
         last_found = out.copy()
+        t_thresh = gen_thresh(last_found[:-1])[0,0]
 
+        # now wait for the real signal!
         sig = np.atleast_2d(np.array(sample_queue.get()))
-        last_found[-1,1] = sig[0,0] - gen_thresh(last_found[:-1],time=True)[0]
+        last_found[-1,1] = sig[0,0] - t_thresh
+        thresh = gen_thresh(last_found[:-1])  # generate thresholds
 
     st = 1000./dic['samplerate']
 
@@ -310,30 +309,30 @@ def rtp_finder(dic,sample_queue,peak_queue):
         if i[0] < sig[-1,0] + st: continue
 
         sig = np.vstack((sig,i))
-        peak, trough = peak_or_trough(sig, last_found)
+        peak, trough = peak_or_trough(sig, last_found, thresh, st)
 
-        if peak or trough:
+        if peak is not None or trough is not None:
             # get index of extrema
-            ex = get_extrema(sig[:,1],peaks=peak)[-1]
+            ex, l = peak or trough, int(bool(peak))
 
-            # add to last_found
-            last_found = np.vstack((last_found,
-                                    np.append([int(peak)], sig[ex])))
+            # add to last_found and reload thresholds
+            last_found = np.vstack((last_found, np.append([l], sig[ex])))
+            thresh = gen_thresh(last_found[:-1])  # regenerate thresholds
 
             # if extrema was detected "immediately" then log detection
             if ex == len(sig)-2:
                 if dic['debug']:
-                    print("Found {}".format('peak' if peak else 'trough'))
-                    peak_queue.put(np.append(sig[-1], [int(peak), rec]))
+                    print("Found {}".format('peak' if l else 'trough'))
+                    peak_queue.put(np.append(sig[-1], [l, rec]))
                 else:
-                    keypress.PressKey(0x50 if peak else 0x54)
-                    peak_queue.put(np.append(sig[-1], [int(peak)]))
+                    keypress.PressKey(0x50 if l else 0x54)
+                    peak_queue.put(np.append(sig[-1], [l]))
 
             # reset sig
             sig = np.atleast_2d(sig[-1])
 
 
-def peak_or_trough(signal, last_found):
+def peak_or_trough(signal, last_found, thresh, fs):
     """
     Helper function for rtp_finder()
 
@@ -346,27 +345,26 @@ def peak_or_trough(signal, last_found):
         Time, physio data since last detection
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
+    thresholds : array (2x2)
+        Average (c1) and std (c2) thresholds for time (r1) and height (r2)
+    fs : float
+        Sampling rate
 
     Returns
     -------
     bool, bool : peak detected, trough detected
     """
 
-    # generate thresholds and confidence intervals
-    h_thresh, h_ci = gen_thresh(last_found[:-1])
-    t_thresh, t_ci = gen_thresh(last_found[:-1],time=True)
-
-    # only accept CI if at least 20 samples
-    if last_found.shape[0] < 20: h_ci, t_ci = h_thresh/2, t_thresh/2
-
     # if time since last det > upper bound of normal time interval
     # shrink height threshold by relative factor
-    divide = (signal[-1,0]-last_found[-1,1])/(t_thresh+t_ci)
-    if divide > 1: h_thresh /= divide
+    divide = (signal[-1,0]-last_found[-1,1]) / (thresh[0,0]+thresh[0,1])
+    divide = divide if divide>1 else 1
+
+    tdiff = thresh[0,0] - thresh[0,1]
+    hdiff = thresh[1,0] - (thresh[1,1]/divide)
 
     # approximate # of samples between detections
-    fs = np.diff(signal[:,0]).mean()
-    avgrate = int(np.floor(t_thresh/fs - t_ci/fs))
+    avgrate = int(np.floor(tdiff/fs))
     if avgrate < 0: avgrate = 5  # if negative, let's just look 5 back
 
     if last_found[-1,0] != 1:  # if we're looking for a peak
@@ -378,8 +376,8 @@ def peak_or_trough(signal, last_found):
             sh = signal[p,1]-last_found[-1,2]
             rh = signal[p,0]-last_found[-1,1]
 
-            if sh > h_thresh-h_ci and rh > t_thresh-t_ci and max_:
-                return True, False
+            if sh > hdiff and rh > tdiff and max_:
+                return p, None
 
     if last_found[-1,0] != 0:  # if we're looking for a trough
         troughs = get_extrema(signal[:,1],peaks=False)
@@ -390,13 +388,13 @@ def peak_or_trough(signal, last_found):
             sh = signal[t,1]-last_found[-1,2]
             rh = signal[t,0]-last_found[-1,1]
 
-            if sh < -h_thresh+h_ci and rh > t_thresh-t_ci and min_:
-                return False, True
+            if sh < -hdiff and rh > tdiff and min_:
+                return None, t
 
-    return False, False
+    return None, None
 
 
-def gen_thresh(last_found,time=False):
+def gen_thresh(last_found):
     """
     Helper function for peak_or_trough()
 
@@ -407,34 +405,38 @@ def gen_thresh(last_found,time=False):
     ----------
     last_found : array (n x 3)
         Class, time, and height of previously detected peaks/troughs
-    time : bool
-        Whether to generate time threshold (default: False, generates height)
 
     Returns
     -------
-    float : threshold
+    array (2x2) : [[avg time, std time], [avg height, std height]]
     """
 
-    col = 1 if time else 2
+    output = np.zeros((2,2))
+    for col in [1,2]:
+        peaks = last_found[last_found[:,0]==1,col]
+        troughs = last_found[last_found[:,0]==0,col]
 
-    peaks = last_found[last_found[:,0]==1,col]
-    troughs = last_found[last_found[:,0]==0,col]
+        if peaks.size != troughs.size:
+            size = np.min([peaks.size,troughs.size])
+            dist = peaks[-size:]-troughs[-size:]
+        else:
+            dist = peaks-troughs
 
-    size = np.min([peaks.size,troughs.size])
-    dist = peaks[-size:]-troughs[-size:]
+        # get rid of gross outliers (likely caused by pauses in peak finding)
+        dist = dist[np.where(np.logical_and(dist<dist.mean()+dist.std()*3,
+                                            dist>dist.mean()-dist.std()*3))[0]]
 
-    # get rid of gross outliers (likely caused by pauses in peak finding)
-    dist = dist[np.where(np.logical_and(dist<dist.mean()+dist.std()*3,
-                                        dist>dist.mean()-dist.std()*3))[0]]
+        weights = np.power(range(1,dist.size+1),5)  # exponential weighting
 
-    weights = np.power(range(1,dist.size+1),5)  # exponential weighting
+        thresh = np.average(dist, weights=weights)  # weighted avg
+        if last_found.shape[0] > 20:
+            variance = np.average((dist-thresh)**2, weights=weights)*dist.size
+            stdev = np.sqrt(variance/(dist.size-1))*2.5  # unbiased std
+        else:
+            stdev = thresh/2
+        output[col-1] = [np.abs(thresh),stdev]
 
-    thresh = np.average(dist, weights=weights)  # weighted avg
-    variance = np.average((dist-thresh)**2, weights=weights)*dist.size
-    stdev = np.sqrt(variance/(dist.size-1))*2.5  # weighted std (unbiased)
-
-    if not time: return thresh, stdev
-    else: return np.abs(thresh), stdev
+    return output
 
 
 def get_extrema(data, peaks=True, thresh=0):
@@ -489,6 +491,5 @@ def normalize(data):
 
     if data.ndim > 1: raise IndexError("Input must be one-dimensional.")
 
-    if data.size == 1: return data
-    if data.std() == 0: return data - data.mean()
+    if data.size == 1 or data.std() == 0: return data - data.mean()
     else: return (data - data.mean()) / data.std()

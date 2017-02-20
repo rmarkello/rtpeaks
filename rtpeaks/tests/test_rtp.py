@@ -54,46 +54,48 @@ def rtp_finder(signal,dic,plot=False):
                            dic['channelloc'],
                            dic['samplerate'])
         last_found = out.copy()
-        t_thresh, t_ci = gen_thresh(last_found[:-1],time=True)
-        last_found[-1,1] = signal[0,0]-t_thresh
+        t_thresh = gen_thresh(last_found[:-1])[0,0]
+
+        last_found[-1,1] = signal[0,0] - t_thresh
+        thresh = gen_thresh(last_found[:-1])
+        if plot: tdiff = thresh[0,0] - thresh[0,1]
 
     sig = np.atleast_2d(signal[0])
-    sig_plot = sig.copy()
+
     st = 1000./dic['samplerate']
+    if plot: x = np.arange(signal[0,0],signal[-1,0],st)
 
     for i in signal[1:]:
         if i[0] < sig[-1,0] + st: continue
 
-        sig, sig_plot = np.vstack((sig,i)), np.vstack((sig_plot,i))
-        peak, trough = peak_or_trough(sig, last_found)
+        sig = np.vstack((sig,i))
+        peak, trough = peak_or_trough(sig, last_found, thresh, st)
 
         if plot:
-            h_thresh, h_ci = gen_thresh(last_found[:-1])
-            t_thresh, t_ci = gen_thresh(last_found[:-1],time=True)
-            if last_found.shape[0] < 20: h_ci, t_ci = h_thresh/2, t_thresh/2
-            divide = (sig[-1,0]-last_found[-1,1])/(t_thresh+t_ci)
-            if divide > 1: h_thresh /= divide
-            fs = np.diff(sig[:,0]).mean()
-            avgrate = int(np.floor(t_thresh/fs - t_ci/fs))
-            if avgrate < 0: avgrate = 5
+            # if time since last det > upper bound of normal time interval
+            # shrink height threshold by relative factor
+            divide = (sig[-1,0]-last_found[-1,1]) / (thresh[0,0]+thresh[0,1])
+            divide = divide if divide>1 else 1
 
-            m = last_found[last_found[:,1]>sig_plot[0,0]]
+            hdiff = thresh[1,0] - (thresh[1,1]/divide)
+
+            m = last_found[last_found[:,1]>signal[0,0]]
             p, t = m[m[:,0]==1], m[m[:,0]==0]
             if len(t)>0: all_troughs.set(xdata=t[:,1],ydata=t[:,2])
             if len(p)>0: all_peaks.set(xdata=p[:,1],ydata=p[:,2])
-            part_sig.set(xdata=np.array([sig_plot[-1,0]]),
-                         ydata=np.array([sig_plot[-1,1]]))
 
-            x = np.arange(sig_plot[0,0],sig_plot[-1,0]+10)
+            part_sig.set(xdata=np.array([sig[-1,0]]),
+                         ydata=np.array([sig[-1,1]]))
+
             if last_found[-1,0] != 1:
-                mult = last_found[-1,2]+h_thresh-h_ci
+                mult = last_found[-1,2]+hdiff
                 hline.set(color='r',xdata=x,
                           ydata=np.ones(x.size)*mult)
             if last_found[-1,0] != 0:
-                mult = last_found[-1,2]-h_thresh+h_ci
+                mult = last_found[-1,2]-hdiff
                 hline.set(color='g',xdata=x,
                           ydata=np.ones(x.size)*mult)
-            vline.set(xdata=np.array([last_found[-1,1]+t_thresh-t_ci]),
+            vline.set(xdata=np.array([last_found[-1,1]+tdiff]),
                       ydata=np.arange(*ax.get_ylim()))
 
             ax.draw_artist(ax.patch)
@@ -106,22 +108,23 @@ def rtp_finder(signal,dic,plot=False):
             fig.canvas.update()
             fig.canvas.flush_events()
 
-        if peak or trough:
+        if peak is not None or trough is not None:
             # get index of extrema
-            ex = get_extrema(sig[:,1],peaks=peak)[-1]
+            ex, l = peak or trough, int(bool(peak))
 
             # add to last_found
-            last_found = np.vstack((last_found,
-                                    np.append([int(peak)], sig[ex])))
+            last_found = np.vstack((last_found, np.append([l], sig[ex])))
+            thresh = gen_thresh(last_found[:-1])
+            if plot: tdiff = thresh[0,0] - thresh[0,1]
 
             # if extrema was detected "immediately" then log detection
             if ex == len(sig)-2:
                 if not plot:
-                    print("Found {}".format('peak' if peak else 'trough'))
-                detected.append(np.append(sig[-1], [int(peak)]))
+                    print("Found {}".format('peak' if l else 'trough'))
+                detected.append(np.append(sig[-1], [l]))
             else:
                 if not plot:
-                    print("Missed {}".format('peak' if peak else 'trough'))
+                    print("Missed {}".format('peak' if l else 'trough'))
                 detected.append(np.append(sig[ex], [2]))
 
             # reset sig
