@@ -5,7 +5,6 @@ Thanks to @esdalmaijer: https://github.com/esdalmaijer/MPy150
 
 from __future__ import print_function, division, absolute_import
 import os
-import time
 import numpy as np
 import multiprocessing as mp
 from ctypes import windll, c_int, c_double, byref

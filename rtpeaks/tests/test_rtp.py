@@ -33,8 +33,21 @@ def rtp_finder(signal,dic,plot=False):
     """
 
     detected = []
-    if plot: fig, ax = plt.subplots(1)
     last_found = np.array([[0,0,0],[1,0,0],[-1,0,0]]*2)
+
+    if plot:
+        fig, ax = plt.subplots(1)
+        plt.show(block=False)
+        ax.set(ylim=[signal[:,1].min()-2,signal[:,1].max()+2],
+               xlim=[signal[0,0],signal[-1,0]])
+        whole_sig, part_sig, all_peaks, all_troughs, hline, vline = ax.plot(
+            signal[:,0],signal[:,1],'blue',
+            np.array([0]),np.array([0]),'oc',
+            np.array([0]),np.array([0]),'or',
+            np.array([0]),np.array([0]),'og',
+            np.array([0]),np.array([0]),'r',
+            np.array([0]),np.array([0]),'black')
+        fig.canvas.draw()
 
     if dic['baseline']:
         out = get_baseline(op.join(os.getcwd(),'data',dic['log']),
@@ -55,40 +68,43 @@ def rtp_finder(signal,dic,plot=False):
         peak, trough = peak_or_trough(sig, last_found)
 
         if plot:
-            # for plotting
             h_thresh, h_ci = gen_thresh(last_found[:-1])
             t_thresh, t_ci = gen_thresh(last_found[:-1],time=True)
-
-            # only accept CI if at least 20 samples
             if last_found.shape[0] < 20: h_ci, t_ci = h_thresh/2, t_thresh/2
-
-            # if time since last det > upper bound of normal time interval
-            # shrink height threshold by relative factor
             divide = (sig[-1,0]-last_found[-1,1])/(t_thresh+t_ci)
             if divide > 1: h_thresh /= divide
-
-            # approximate # of samples between detections
             fs = np.diff(sig[:,0]).mean()
             avgrate = int(np.floor(t_thresh/fs - t_ci/fs))
-            if avgrate < 0: avgrate = 5  # if negative, let's just look 5 back
+            if avgrate < 0: avgrate = 5
 
-            plt.hold(True)
-            ax.clear()
-            ax.set(ylim=[signal[:,1].min()-2,signal[:,1].max()+2],
-                   xlim=[signal[0,0]-10000,signal[-1,0]+10000])
             m = last_found[last_found[:,1]>sig_plot[0,0]]
-            ax.plot(sig_plot[:,0],sig_plot[:,1],
-                    m[m[:,0]==1][:,1],m[m[:,0]==1][:,2],'or',
-                    m[m[:,0]==0][:,1],m[m[:,0]==0][:,2],'og')
-            if last_found[-1,0] != 1: ax.hlines(last_found[-1,2]+h_thresh-h_ci,
-                                                sig_plot[0,0],
-                                                sig_plot[-1,0]+10,
-                                                'r')
-            if last_found[-1,0] != 0: ax.hlines(last_found[-1,2]-h_thresh+h_ci,
-                                                sig_plot[0,0],
-                                                sig_plot[-1,0]+10,
-                                                'g')
-            ax.vlines(last_found[-1,1]+t_thresh-t_ci,*ax.get_ylim())
+            p, t = m[m[:,0]==1], m[m[:,0]==0]
+            if len(t)>0: all_troughs.set(xdata=t[:,1],ydata=t[:,2])
+            if len(p)>0: all_peaks.set(xdata=p[:,1],ydata=p[:,2])
+            part_sig.set(xdata=np.array([sig_plot[-1,0]]),
+                         ydata=np.array([sig_plot[-1,1]]))
+
+            x = np.arange(sig_plot[0,0],sig_plot[-1,0]+10)
+            if last_found[-1,0] != 1:
+                mult = last_found[-1,2]+h_thresh-h_ci
+                hline.set(color='r',xdata=x,
+                          ydata=np.ones(x.size)*mult)
+            if last_found[-1,0] != 0:
+                mult = last_found[-1,2]-h_thresh+h_ci
+                hline.set(color='g',xdata=x,
+                          ydata=np.ones(x.size)*mult)
+            vline.set(xdata=np.array([last_found[-1,1]+t_thresh-t_ci]),
+                      ydata=np.arange(*ax.get_ylim()))
+
+            ax.draw_artist(ax.patch)
+            ax.draw_artist(whole_sig)
+            ax.draw_artist(hline)
+            ax.draw_artist(vline)
+            if len(t)>0: ax.draw_artist(all_troughs)
+            if len(p)>0: ax.draw_artist(all_peaks)
+            ax.draw_artist(part_sig)
+            fig.canvas.update()
+            fig.canvas.flush_events()
 
         if peak or trough:
             # get index of extrema
@@ -110,8 +126,6 @@ def rtp_finder(signal,dic,plot=False):
 
             # reset sig
             sig = np.atleast_2d(sig[-1])
-
-        if plot: plt.pause(1e-9)
 
     return np.array(detected)
 

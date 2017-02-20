@@ -128,9 +128,6 @@ class RTP(MP150):
         self.dic['pipe'] = None
         self.stop_recording()
 
-        # tell peak finder to not force peak after next start_peak_finding
-        self.sample_queue.put('break')
-
         # ensure peak logging process quits successfully
         self.peak_queue.put('kill')
         self.peak_log_process.join()
@@ -308,8 +305,8 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
     while True:
         i = sample_queue.get()
+        if dic['debug']: rec = dic['newesttime']
         if i == 'kill': break
-        if i == 'break': continue  # somehow make this ensure forced peaks real
         if i[0] < sig[-1,0] + st: continue
 
         sig = np.vstack((sig,i))
@@ -327,10 +324,10 @@ def rtp_finder(dic,sample_queue,peak_queue):
             if ex == len(sig)-2:
                 if dic['debug']:
                     print("Found {}".format('peak' if peak else 'trough'))
+                    peak_queue.put(np.append(sig[-1], [int(peak), rec]))
                 else:
                     keypress.PressKey(0x50 if peak else 0x54)
-
-                peak_queue.put(np.append(sig[-1], [int(peak)]))
+                    peak_queue.put(np.append(sig[-1], [int(peak)]))
 
             # reset sig
             sig = np.atleast_2d(sig[-1])
