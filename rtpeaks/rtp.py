@@ -298,8 +298,8 @@ def rtp_finder(dic,sample_queue,peak_queue):
         # now wait for the real signal!
         sig = np.atleast_2d(np.array(sample_queue.get()))
         last_found[-1,1] = sig[0,0] - t_thresh
-        thresh = gen_thresh(last_found[:-1])  # generate thresholds
 
+    thresh = gen_thresh(last_found[:-1])  # generate thresholds
     st = 1000./dic['samplerate']
 
     while True:
@@ -317,6 +317,12 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
             # add to last_found and reload thresholds
             last_found = np.vstack((last_found, np.append([l], sig[ex])))
+            # if we didn't baseline and have gotten some peaks/troughs
+            # fix the last_found array so as not to have starter datapoints
+            if (not dic['baseline'] and len(last_found)>7 and
+                    np.any(last_found[:,1]==0)):
+                last_found = last_found[np.where(last_found[:,1]!=0)[0]]
+                last_found = np.vstack((last_found,last_found))
             thresh = gen_thresh(last_found[:-1])  # regenerate thresholds
 
             # if extrema was detected "immediately" then log detection
@@ -361,7 +367,7 @@ def peak_or_trough(signal, last_found, thresh, fs):
     divide = divide if divide>1 else 1
 
     tdiff = thresh[0,0] - thresh[0,1]
-    hdiff = thresh[1,0] - (thresh[1,1]/divide)
+    hdiff = (thresh[1,0] - thresh[1,1])/divide
 
     # approximate # of samples between detections
     avgrate = int(np.floor(tdiff/fs))
@@ -423,8 +429,8 @@ def gen_thresh(last_found):
             dist = peaks-troughs
 
         # get rid of gross outliers (likely caused by pauses in peak finding)
-        dist = dist[np.where(np.logical_and(dist<dist.mean()+dist.std()*3,
-                                            dist>dist.mean()-dist.std()*3))[0]]
+        dist = dist[np.where(np.logical_and(dist<=dist.mean()+dist.std()*3,
+                                            dist>=dist.mean()-dist.std()*3))[0]]
 
         weights = np.power(range(1,dist.size+1),5)  # exponential weighting
 

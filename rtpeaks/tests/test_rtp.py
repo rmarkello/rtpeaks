@@ -5,7 +5,7 @@ import os
 import os.path as op
 import numpy as np
 import matplotlib.pyplot as plt
-from rtpeaks.rtp import get_baseline, peak_or_trough, get_extrema, gen_thresh
+from rtpeaks.rtp import get_baseline, peak_or_trough, gen_thresh
 
 
 def rtp_finder(signal,dic,plot=False):
@@ -57,9 +57,9 @@ def rtp_finder(signal,dic,plot=False):
         t_thresh = gen_thresh(last_found[:-1])[0,0]
 
         last_found[-1,1] = signal[0,0] - t_thresh
-        thresh = gen_thresh(last_found[:-1])
-        if plot: tdiff = thresh[0,0] - thresh[0,1]
 
+    thresh = gen_thresh(last_found[:-1])
+    if plot: tdiff = thresh[0,0] - thresh[0,1]
     sig = np.atleast_2d(signal[0])
 
     st = 1000./dic['samplerate']
@@ -77,7 +77,7 @@ def rtp_finder(signal,dic,plot=False):
             divide = (sig[-1,0]-last_found[-1,1]) / (thresh[0,0]+thresh[0,1])
             divide = divide if divide>1 else 1
 
-            hdiff = thresh[1,0] - (thresh[1,1]/divide)
+            hdiff = (thresh[1,0] - thresh[1,1])/divide
 
             m = last_found[last_found[:,1]>signal[0,0]]
             p, t = m[m[:,0]==1], m[m[:,0]==0]
@@ -114,6 +114,10 @@ def rtp_finder(signal,dic,plot=False):
 
             # add to last_found
             last_found = np.vstack((last_found, np.append([l], sig[ex])))
+            if (not dic['baseline'] and len(last_found)>7 and
+                    np.any(last_found[:,1]==0)):
+                last_found = last_found[np.where(last_found[:,1]!=0)[0]]
+                last_found = np.vstack((last_found,last_found))
             thresh = gen_thresh(last_found[:-1])
             if plot: tdiff = thresh[0,0] - thresh[0,1]
 
@@ -145,7 +149,7 @@ def test_RTP(f,channelloc=0,samplerate=1000,plot=False):
            'baseline'   : True,
            'channelloc' : channelloc}
 
-    detected = rtp_finder(signal,dic,plot=True)
+    detected = rtp_finder(signal,dic,plot=plot)
 
     if plot:
         import matplotlib.pyplot as plt
