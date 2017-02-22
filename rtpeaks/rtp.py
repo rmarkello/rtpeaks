@@ -130,7 +130,7 @@ class RTP(MP150):
 
         # ensure peak logging process quits successfully
         self.peak_queue.put('kill')
-        self.peak_log_process.join()
+        if hasattr(self,'peak_log_process'): self.peak_log_process.join()
 
     def start_baseline(self, channel, samplerate):
         """
@@ -161,7 +161,7 @@ class RTP(MP150):
 
         self.stop_recording()
         self.dic['baseline'] = True
-        self.sample_queue.put([self.timestamp(),self.base_chan])
+        self.sample_queue.put([self.timestamp,self.base_chan])
 
     def close(self):
         """
@@ -190,7 +190,7 @@ def rtp_log(log,que):
 
     while True:
         i = que.get()
-        if i == 'kill': break
+        if isinstance(i,str) and i == 'kill': break
         f.write("{0}\n".format(','.join(str(y) for y in list(i))))
         f.flush()
 
@@ -287,25 +287,28 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
     # this will block until an item is available in sample_queue
     # i.e., dic['pipe'] is set
-    sig = np.atleast_2d(np.array(sample_queue.get()))
+    sig = sample_queue.get()
+    if isinstance(sig,str) and sig == 'kill': return
+    else: sig = np.atleast_2d(np.array(sig))
     last_found = np.array([[0,0,0],[1,0,0],[-1,0,0]]*2)
 
     if dic['baseline']:
-        out = get_baseline(dic['log'],sig[-1,1],dic['samplerate'])
+        out = get_baseline(dic['log'],int(sig[-1,1]),dic['samplerate'])
         last_found = out.copy()
         t_thresh = gen_thresh(last_found[:-1])[0,0]
 
         # now wait for the real signal!
-        sig = np.atleast_2d(np.array(sample_queue.get()))
+        sig = sample_queue.get()
+        if isinstance(sig,str) and sig == 'kill': return
+        else: sig = np.atleast_2d(np.array(sig))
         last_found[-1,1] = sig[0,0] - t_thresh
 
     thresh = gen_thresh(last_found[:-1])  # generate thresholds
-    st = 1000./dic['samplerate']
+    st = np.ceil(1000./dic['samplerate'])
 
     while True:
         i = sample_queue.get()
-        if dic['debug']: rec = dic['newesttime']
-        if i == 'kill': break
+        if isinstance(i,str) and i == 'kill': return
         if i[0] < sig[-1,0] + st: continue
 
         sig = np.vstack((sig,i))
@@ -329,7 +332,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
             if ex == len(sig)-2:
                 if dic['debug']:
                     print("Found {}".format('peak' if l else 'trough'))
-                    peak_queue.put(np.append(sig[-1], [l, rec]))
+                    peak_queue.put(np.append(sig[-1], [l, dic['newesttime']]))
                 else:
                     keypress.PressKey(0x50 if l else 0x54)
                     peak_queue.put(np.append(sig[-1], [l]))
@@ -429,10 +432,11 @@ def gen_thresh(last_found):
             dist = peaks-troughs
 
         # get rid of gross outliers (likely caused by pauses in peak finding)
-        dist = dist[np.where(np.logical_and(dist<=dist.mean()+dist.std()*3,
-                                            dist>=dist.mean()-dist.std()*3))[0]]
+        inds = np.where(np.logical_and(dist<=dist.mean()+dist.std()*3,
+                                       dist>=dist.mean()-dist.std()*3))[0]
+        dist = dist[inds]
 
-        weights = np.power(range(1,dist.size+1),5)  # exponential weighting
+        weights = np.power(range(1,dist.size+1),1.1)  # exponential weighting
 
         thresh = np.average(dist, weights=weights)  # weighted avg
         if last_found.shape[0] > 20:
