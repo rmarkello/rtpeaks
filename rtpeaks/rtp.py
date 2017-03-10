@@ -150,6 +150,7 @@ class RTP(MP150):
 
         self.start_recording(run='_baseline')
         self.base_chan = np.where(self.dic['channels'] == channel)[0][0]
+        self.base_rate = samplerate
 
     def stop_baseline(self):
         """
@@ -161,7 +162,7 @@ class RTP(MP150):
 
         self.stop_recording()
         self.dic['baseline'] = True
-        self.sample_queue.put([self.timestamp,self.base_chan])
+        self.sample_queue.put([self.base_chan,self.base_rate])
 
     def close(self):
         """
@@ -287,13 +288,14 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
     # this will block until an item is available in sample_queue
     # i.e., dic['pipe'] is set
+    # or, if we've gotten baseline, this will be that!
     sig = sample_queue.get()
     if isinstance(sig,str) and sig == 'kill': return
     else: sig = np.atleast_2d(np.array(sig))
     last_found = np.array([[0,0,0],[1,0,0],[-1,0,0]]*2)
 
     if dic['baseline']:
-        out = get_baseline(dic['log'],int(sig[-1,1]),dic['samplerate'])
+        out = get_baseline(dic['log'],int(sig[-1,0]),int(sig[-1,1]))
         last_found = out.copy()
         t_thresh = gen_thresh(last_found[:-1])[0,0]
 

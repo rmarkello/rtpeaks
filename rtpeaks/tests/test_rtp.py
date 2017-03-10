@@ -79,19 +79,21 @@ def rtp_finder(signal,dic,plot=False):
 
             hdiff = (thresh[1,0] - thresh[1,1])/divide
 
+            # draw previously detected peaks and troughs
             m = last_found[last_found[:,1]>signal[0,0]]
             p, t = m[m[:,0]==1], m[m[:,0]==0]
             if len(t)>0: all_troughs.set(xdata=t[:,1],ydata=t[:,2])
             if len(p)>0: all_peaks.set(xdata=p[:,1],ydata=p[:,2])
 
+            # set the moving blue dot denoting signal
             part_sig.set(xdata=np.array([sig[-1,0]]),
                          ydata=np.array([sig[-1,1]]))
 
-            if last_found[-1,0] != 1:
+            if last_found[-1,0] != 1:  # if we're looking for a peak
                 mult = last_found[-1,2]+hdiff
                 hline.set(color='r',xdata=x,
                           ydata=np.ones(x.size)*mult)
-            if last_found[-1,0] != 0:
+            if last_found[-1,0] != 0:  # if we're looking for a trpugh
                 mult = last_found[-1,2]-hdiff
                 hline.set(color='g',xdata=x,
                           ydata=np.ones(x.size)*mult)
