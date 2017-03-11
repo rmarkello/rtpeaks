@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import
 import multiprocessing as mp
 import numpy as np
+from scipy.signal import savgol_filter as savgol
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -241,6 +242,7 @@ def get_baseline(log, channel_loc, samplerate):
         indata = data.copy()
 
     pf = PeakFinder(indata[:,1],fs=samplerate)
+    pf.lowpass()
     if pf.fs != 1000: pf.interpolate(np.floor(1000/pf.fs))
     pf.get_peaks(thresh=0.2)
 
@@ -306,7 +308,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
         last_found[-1,1] = sig[0,0] - t_thresh
 
     thresh = gen_thresh(last_found[:-1])  # generate thresholds
-    st = np.ceil(1000./dic['samplerate'])
+    st = np.ceil(1000./dic['samplerate'])  # sampling time
 
     while True:
         i = sample_queue.get()
@@ -314,6 +316,9 @@ def rtp_finder(dic,sample_queue,peak_queue):
         if i[0] < sig[-1,0] + st: continue
 
         sig = np.vstack((sig,i))
+        # apply savgol filter to signal if len>3
+        # helps with smoothing of downsampled signals (i.e., respiration)
+        if len(sig)>3: sig[:,1] = savgol(sig[:,1],3,1)
         peak, trough = peak_or_trough(sig, last_found, thresh, st)
 
         if peak is not None or trough is not None:
@@ -328,10 +333,13 @@ def rtp_finder(dic,sample_queue,peak_queue):
                     np.any(last_found[:,1]==0)):
                 last_found = last_found[np.where(last_found[:,1]!=0)[0]]
                 last_found = np.vstack((last_found,last_found))
-            thresh = gen_thresh(last_found[:-1])  # regenerate thresholds
 
-            # if extrema was detected "immediately" then log detection
-            if ex == len(sig)-2:
+            # regenerate thresholds
+            thresh = gen_thresh(last_found[:-1])
+
+            # if extrema was detected "immediately" (i.e., within 2 datapoints
+            # of real-time) then log detection.
+            if len(sig)-ex <= 3:
                 if dic['debug']:
                     print("Found {}".format('peak' if l else 'trough'))
                     peak_queue.put(np.append(sig[-1], [l, dic['newesttime']]))
@@ -438,12 +446,12 @@ def gen_thresh(last_found):
                                        dist>=dist.mean()-dist.std()*3))[0]
         dist = dist[inds]
 
-        weights = np.power(range(1,dist.size+1),1.1)  # exponential weighting
+        weights = np.linspace(1,10,dist.size)  # weighting
 
         thresh = np.average(dist, weights=weights)  # weighted avg
         if last_found.shape[0] > 20:
             variance = np.average((dist-thresh)**2, weights=weights)*dist.size
-            stdev = np.sqrt(variance/(dist.size-1))*2.5  # unbiased std
+            stdev = np.sqrt(variance/(dist.size-1))*1.5  # unbiased std
         else:
             stdev = thresh/2
         output[col-1] = [np.abs(thresh),stdev]

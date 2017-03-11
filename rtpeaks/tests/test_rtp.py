@@ -5,10 +5,12 @@ import os
 import os.path as op
 import numpy as np
 import matplotlib.pyplot as plt
-from rtpeaks.rtp import get_baseline, peak_or_trough, gen_thresh
+from scipy.signal import savgol_filter as savgol
+if os.name !='posix':
+    from rtpeaks.rtp import get_baseline, peak_or_trough, gen_thresh
 
 
-def rtp_finder(signal,dic,plot=False):
+def test_rtp_finder(signal,dic,plot=False):
     """
     Simulates detection of peaks/troughs in real time
 
@@ -40,8 +42,10 @@ def rtp_finder(signal,dic,plot=False):
         plt.show(block=False)
         ax.set(ylim=[signal[:,1].min()-2,signal[:,1].max()+2],
                xlim=[signal[0,0],signal[-1,0]])
+        inds = np.arange(0,signal.shape[0],np.ceil(1000./dic['samplerate']),
+                         dtype='int64')
         whole_sig, part_sig, all_peaks, all_troughs, hline, vline = ax.plot(
-            signal[:,0],signal[:,1],'blue',
+            signal[inds,0],signal[inds,1],'blue',
             np.array([0]),np.array([0]),'oc',
             np.array([0]),np.array([0]),'or',
             np.array([0]),np.array([0]),'og',
@@ -62,13 +66,14 @@ def rtp_finder(signal,dic,plot=False):
     if plot: tdiff = thresh[0,0] - thresh[0,1]
     sig = np.atleast_2d(signal[0])
 
-    st = 1000./dic['samplerate']
+    st = np.ceil(1000./dic['samplerate'])
     if plot: x = np.arange(signal[0,0],signal[-1,0],st)
 
     for i in signal[1:]:
         if i[0] < sig[-1,0] + st: continue
 
         sig = np.vstack((sig,i))
+        if len(sig)>3: sig[:,1] = savgol(sig[:,1],3,1)
         peak, trough = peak_or_trough(sig, last_found, thresh, st)
 
         if plot:
@@ -124,13 +129,9 @@ def rtp_finder(signal,dic,plot=False):
             if plot: tdiff = thresh[0,0] - thresh[0,1]
 
             # if extrema was detected "immediately" then log detection
-            if ex == len(sig)-2:
-                if not plot:
-                    print("Found {}".format('peak' if l else 'trough'))
+            if len(sig)-ex <= 3:
                 detected.append(np.append(sig[-1], [l]))
             else:
-                if not plot:
-                    print("Missed {}".format('peak' if l else 'trough'))
                 detected.append(np.append(sig[ex], [2]))
 
             # reset sig
@@ -139,7 +140,7 @@ def rtp_finder(signal,dic,plot=False):
     return np.array(detected)
 
 
-def test_RTP(f,channelloc=0,samplerate=1000,plot=False):
+def test_RTP(f,channelloc=0,samplerate=1000,plot=False,rtplot=False):
     fname = op.join(os.getcwd(),'data','{}-run1_MP150_data.csv'.format(f))
     signal = np.loadtxt(fname,
                         skiprows=1,
@@ -151,7 +152,7 @@ def test_RTP(f,channelloc=0,samplerate=1000,plot=False):
            'baseline'   : True,
            'channelloc' : channelloc}
 
-    detected = rtp_finder(signal,dic,plot=plot)
+    detected = test_rtp_finder(signal,dic,plot=rtplot)
 
     if plot:
         import matplotlib.pyplot as plt
