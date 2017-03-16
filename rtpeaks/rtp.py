@@ -350,6 +350,11 @@ def rtp_finder(dic,sample_queue,peak_queue):
             # reset sig
             sig = np.atleast_2d(sig[-1])
 
+        # reset to baseline if it's been more than 10 seconds
+        elif dic['baseline'] and (sig[-1,0]-last_found[-1,1]) > 10000:
+            last_found = out.copy()
+            thresh = gen_thresh(last_found[:-1])
+
 
 def peak_or_trough(signal, last_found, thresh, fs):
     """
