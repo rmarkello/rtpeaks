@@ -8,7 +8,6 @@ setup(
     version=__version__,
     description='Real-time peak detection with BioPac MP150',
     maintainer='Ross Markello',
-    maintainer_email='rossmarkello@gmail.com',
     url='http://github.com/rmarkello/rtpeaks',
     install_requires=['numpy','scipy'],
     packages=find_packages(exclude=['setup','rtpeaks/tests']),

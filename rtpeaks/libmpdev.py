@@ -64,6 +64,7 @@ class MP150(object):
 
         self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
+        self.log_process = None
 
         self.sample_process = mp.Process(target=mp150_sample,
                                          args=(self.dic,
@@ -106,8 +107,10 @@ class MP150(object):
 
         self.dic['record'] = False
 
-        self.log_queue.put('kill')
-        self.log_process.join()
+        if self.log_process is not None:
+            self.log_queue.put('kill')
+            self.log_process.join()
+            self.log_process = None
 
     @property
     def sample(self):
@@ -158,7 +161,7 @@ def mp150_log(fname,channels,log_queue):
 
     while True:
         i = log_queue.get()
-        if i == 'kill': break
+        if isinstance(i,str) and i == 'kill': break
         sig = ','.join(str(y) for y in list(i[1]))
         f.write('{0},{1}\n'.format(i[0],sig))
         f.flush()
@@ -221,7 +224,6 @@ def mp150_sample(dic,sample_queue,log_queue):
                 try: sample_queue.put_nowait([currtime,data[dic['pipe']]])
                 except mp.queues.Full: pass
 
-    sample_queue.put('kill')
     shutdown_mp150(mpdev)
 
 

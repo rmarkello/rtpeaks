@@ -3,7 +3,6 @@
 from __future__ import print_function, division, absolute_import
 import multiprocessing as mp
 import numpy as np
-from scipy.signal import savgol_filter as savgol
 import rtpeaks.keypress as keypress
 from rtpeaks.libmpdev import MP150
 
@@ -64,6 +63,7 @@ class RTP(MP150):
         self.dic['samplerate'] = samplerate
         self.dic['debug'] = debug
         self.dic['log'] = logfile
+        self.peak_log_process = None
 
         self.peak_queue = self.manager.Queue()
         self.peak_process = mp.Process(target=rtp_finder,
@@ -130,8 +130,10 @@ class RTP(MP150):
         self.stop_recording()
 
         # ensure peak logging process quits successfully
-        self.peak_queue.put('kill')
-        if hasattr(self,'peak_log_process'): self.peak_log_process.join()
+        if self.peak_log_process is not None:
+            self.peak_queue.put('kill')
+            self.peak_log_process.join()
+            self.peak_log_process = None
 
     def start_baseline(self, channel, samplerate):
         """
@@ -171,6 +173,9 @@ class RTP(MP150):
         """
 
         self.stop_peak_finding()
+        self.sample_queue.put('kill')
+        self.peak_process.join()
+
         super(RTP,self).close()
 
 
@@ -242,7 +247,6 @@ def get_baseline(log, channel_loc, samplerate):
         indata = data.copy()
 
     pf = PeakFinder(indata[:,1],fs=samplerate)
-    pf.lowpass()
     if pf.fs != 1000: pf.interpolate(np.floor(1000/pf.fs))
     pf.get_peaks(thresh=0.2)
 
@@ -250,12 +254,8 @@ def get_baseline(log, channel_loc, samplerate):
     p = np.floor(pf.peakinds[-size:]/np.floor(1000/fs)).astype('int64')
     t = np.floor(pf.troughinds[-size:]/np.floor(1000/fs)).astype('int64')
 
-    pi = np.hstack((np.ones([p.size,1]),
-                    np.atleast_2d(data[p,0]).T,
-                    np.atleast_2d(data[p,1]).T))
-    ti = np.hstack((np.zeros([t.size,1]),
-                    np.atleast_2d(data[t,0]).T,
-                    np.atleast_2d(data[t,1]).T))
+    pi = np.column_stack((np.ones([p.size,1]),data[p,0],data[p,1]))
+    ti = np.column_stack((np.zeros([t.size,1]),data[t,0],data[t,1]))
 
     out = np.vstack((pi,ti))
     out = out[np.argsort(out[:,1])]
@@ -316,9 +316,6 @@ def rtp_finder(dic,sample_queue,peak_queue):
         if i[0] < sig[-1,0] + st: continue
 
         sig = np.vstack((sig,i))
-        # apply savgol filter to signal if len>3
-        # helps with smoothing of downsampled signals (i.e., respiration)
-        if len(sig)>3: sig[:,1] = savgol(sig[:,1],3,1)
         peak, trough = peak_or_trough(sig, last_found, thresh, st)
 
         if peak is not None or trough is not None:
@@ -339,7 +336,7 @@ def rtp_finder(dic,sample_queue,peak_queue):
 
             # if extrema was detected "immediately" (i.e., within 2 datapoints
             # of real-time) then log detection.
-            if len(sig)-ex <= 3:
+            if ex == len(sig)-2:
                 if dic['debug']:
                     print("Found {}".format('peak' if l else 'trough'))
                     peak_queue.put(np.append(sig[-1], [l, dic['newesttime']]))
@@ -353,6 +350,11 @@ def rtp_finder(dic,sample_queue,peak_queue):
         # reset to baseline if it's been more than 10 seconds
         elif dic['baseline'] and (sig[-1,0]-last_found[-1,1]) > 10000:
             last_found = out.copy()
+            t_thresh = gen_thresh(last_found[:-1])[0,0]
+
+            sig = np.atleast_2d(sig[-1])
+            last_found[-1,1] = sig[0,0] - t_thresh
+
             thresh = gen_thresh(last_found[:-1])
 
 
@@ -456,7 +458,7 @@ def gen_thresh(last_found):
         thresh = np.average(dist, weights=weights)  # weighted avg
         if last_found.shape[0] > 20:
             variance = np.average((dist-thresh)**2, weights=weights)*dist.size
-            stdev = np.sqrt(variance/(dist.size-1))*1.5  # unbiased std
+            stdev = np.sqrt(variance/(dist.size-1))*2.5  # unbiased std
         else:
             stdev = thresh/2
         output[col-1] = [np.abs(thresh),stdev]
