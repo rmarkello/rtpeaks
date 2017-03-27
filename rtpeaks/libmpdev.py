@@ -9,6 +9,7 @@ import numpy as np
 import multiprocessing as mp
 from ctypes import windll, c_int, c_double, byref
 from ctypes.wintypes import DWORD
+import rtpeaks.process as rp
 
 
 def get_returncode(returncode):
@@ -66,7 +67,8 @@ class MP150(object):
         self.log_queue = self.manager.Queue()
         self.log_process = None
 
-        self.sample_process = mp.Process(target=mp150_sample,
+        self.sample_process = rp.Process(name='mp150_sample',
+                                         target=mp150_sample,
                                          args=(self.dic,
                                                self.sample_queue,
                                                self.log_queue))
@@ -88,12 +90,13 @@ class MP150(object):
         if self.dic['record']: self.stop_recording()
         self.dic['record'] = True
 
-        if run:
+        if run is not None:
             fname = "{0}-run{1}_MP150_data.csv".format(self.logfile,str(run))
         else:
             fname = "{0}_MP150_data.csv".format(self.logfile)
 
-        self.log_process = mp.Process(target=mp150_log,
+        self.log_process = rp.Process(name='mp150_log',
+                                      target=mp150_log,
                                       args=(fname,
                                             self.dic['channels'],
                                             self.log_queue))
@@ -264,14 +267,14 @@ def shutdown_mp150(dll):
     except: result = "failed to call stopAcquisition"
     result = get_returncode(result)
     if result != "MPSUCCESS":
-        raise Exception("Failed to close the connection: {}".format(result))
+        raise Exception("Failed to stop data acquisition: {}".format(result))
 
     # close connection
     try: result = dll.disconnectMPDev()
     except: result = "failed to call disconnectMPDev"
     result = get_returncode(result)
     if result != "MPSUCCESS":
-        raise Exception("Failed to close the connection: {}".format(result))
+        raise Exception("Failed to disconnect from BioPac: {}".format(result))
 
 
 def setup_mp150(dic):
@@ -307,7 +310,7 @@ def setup_mp150(dic):
     except: result = 0
     result = get_returncode(result)
     if result != "MPSUCCESS":
-        raise Exception("Failed to connect: {}".format(result))
+        raise Exception("Failed to connect to BioPac: {}".format(result))
 
     # set sampling rate
     try: result = mpdev.setSampleRate(c_double(dic['sampletime']))
@@ -339,7 +342,7 @@ def setup_mp150(dic):
     except: result = 0
     result = get_returncode(result)
     if result != "MPSUCCESS":
-        raise Exception("Failed to start acquisition: {}".format(result))
+        raise Exception("Failed to start data acquisition: {}".format(result))
 
     dic['connected'] = True
 

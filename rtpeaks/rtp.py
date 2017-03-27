@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 from __future__ import print_function, division, absolute_import
-import multiprocessing as mp
 import numpy as np
 import rtpeaks.keypress as keypress
+import rtpeaks.process as rp
 from rtpeaks.libmpdev import MP150
 
 
@@ -47,7 +47,7 @@ class RTP(MP150):
             Channels to record from BioPac
         debug : bool
             Whether to run in debug mode. Will print statements rather than
-            imitating keypress
+            imitating keypresses
         """
 
         # check inputs
@@ -66,7 +66,8 @@ class RTP(MP150):
         self.peak_log_process = None
 
         self.peak_queue = self.manager.Queue()
-        self.peak_process = mp.Process(target=rtp_finder,
+        self.peak_process = rp.Process(name='rtp_finder',
+                                       target=rtp_finder,
                                        args=(self.dic,
                                              self.sample_queue,
                                              self.peak_queue))
@@ -95,11 +96,11 @@ class RTP(MP150):
 
         # set peak finding channel
         if isinstance(channel, (list, np.ndarray)): channel = channel[0]
-        elif isinstance(channel, (int)): pass
+        elif isinstance(channel, int): pass
         else: channel = self.dic['channels'][0]
 
         # set peak finding sample rate
-        if isinstance(samplerate, (int,float)):
+        if isinstance(samplerate, (int, float)):
             self.dic['samplerate'] = samplerate
 
         # turn off peak finding if it's currently happening
@@ -115,7 +116,8 @@ class RTP(MP150):
         else:
             fname = "{}_MP150_peaks.csv".format(self.logfile)
 
-        self.peak_log_process = mp.Process(target=rtp_log,
+        self.peak_log_process = rp.Process(name='rtp_log',
+                                           target=rtp_log,
                                            args=(fname,self.peak_queue))
         self.peak_log_process.daemon = True
         self.peak_log_process.start()
