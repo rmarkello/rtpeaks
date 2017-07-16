@@ -216,9 +216,10 @@ def mp150_sample(dic,sample_queue,log_queue):
             dic['newestsample'], dic['newesttime'] = data.copy(), currtime
 
             if dic['record']: log_queue.put([currtime,data])
-
-            if dic['pipe'] is not None:
-                try: sample_queue.put_nowait([currtime,data[dic['pipe']]])
+            
+            pipe_chan = dic['pipe']
+            if pipe_chan is not None:
+                try: sample_queue.put_nowait([currtime,data[pipe_chan]])
                 except mp.queues.Full: pass
 
     sample_queue.put('kill')
