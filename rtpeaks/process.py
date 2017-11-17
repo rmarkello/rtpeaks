@@ -3,6 +3,7 @@
 from future.utils import raise_
 import multiprocessing as mp
 
+
 class Process(mp.Process):
     """
     Multiprocessing process designed to catch exceptions.
@@ -12,7 +13,7 @@ class Process(mp.Process):
     """
 
     def __init__(self, *args, **kwargs):
-        super(Process,self).__init__(*args, **kwargs)
+        super(Process, self).__init__(*args, **kwargs)
 
     def saferun(self):
         if self._target is not None:
