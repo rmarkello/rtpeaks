@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 """
-Thanks to @esdalmaijer: https://github.com/esdalmaijer/MPy150
+Credit to @esdalmaijer for initial basis for code at:
+https://github.com/esdalmaijer/MPy150
+
+All code has been significantly refactored to use multiprocessing instead of
+threading and to play nicely with `rtp.py`, but the calls to mpdev.dll were
+from their initial repo
 """
 
 from __future__ import print_function, division, absolute_import
@@ -14,7 +19,7 @@ import rtpeaks.process as rp
 
 def get_returncode(returncode):
     """
-    Checks return codes from BioPac MP150 device
+    Checks return codes from BioPac device
 
     Parameters
     ----------
@@ -23,7 +28,8 @@ def get_returncode(returncode):
 
     Returns
     -------
-    str : plain-text translation of returncode`
+    str
+        Plain-text translation of returncode
     """
 
     errors = ['MPSUCCESS', 'MPDRVERR', 'MPDLLBUSY',
@@ -50,12 +56,18 @@ class MP150(object):
     ----------
     logfile : str
         Name of output file
-    samplerate : float
-    channels : array_like
+    samplerate : float, optional
+        Set sampling rate for physiological data from BioPac. Default: 500Hz
+    channels : int or array_like, optional
+        List of channels on BioPac device from which to record data. There
+        should be a maximum of 16 (this is the BioPac limit). Default: [1,2]
+    dummy : bool, optional
+        Whether to run in dummy mode (i.e., don't try to connect to BioPac).
+        Default: False
     """
 
     def __init__(self, logfile='default', samplerate=500.,
-                 channels=[1, 2]):
+                 channels=[1, 2], dummy=False):
 
         self.logfile = logfile
         self.manager = mp.Manager()
@@ -75,13 +87,14 @@ class MP150(object):
         self.log_queue = self.manager.Queue()
         self.log_process = None
 
-        self.sample_process = rp.Process(name='mp150_sample',
-                                         target=mp150_sample,
-                                         args=(self.dic,
-                                               self.sample_queue,
-                                               self.log_queue))
-        self.sample_process.daemon = True
-        self.sample_process.start()
+        if not dummy:
+            self.sample_process = rp.Process(name='mp150_sample',
+                                             target=mp150_sample,
+                                             args=(self.dic,
+                                                   self.sample_queue,
+                                                   self.log_queue))
+            self.sample_process.daemon = True
+            self.sample_process.start()
 
         while not self.dic['connected']: pass
 
