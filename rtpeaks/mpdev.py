@@ -4,11 +4,12 @@ Thanks to @esdalmaijer: https://github.com/esdalmaijer/MPy150
 """
 
 from __future__ import print_function, division, absolute_import
-import os
-import numpy as np
-import multiprocessing as mp
 from ctypes import windll, c_int, c_double, byref
 from ctypes.wintypes import DWORD
+import multiprocessing as mp
+import os
+import numpy as np
+import rtpeaks.process as rp
 
 
 def get_returncode(returncode):
@@ -25,15 +26,15 @@ def get_returncode(returncode):
     str : plain-text translation of returncode`
     """
 
-    errors = ['MPSUCCESS',  'MPDRVERR',   'MPDLLBUSY',
-              'MPINVPARA',  'MPNOTCON',   'MPREADY',
-              'MPWPRETRIG', 'MPWTRIG',    'MPBUSY',
-              'MPNOACTCH',  'MPCOMERR',   'MPINVTYPE',
-              'MPNOTINNET', 'MPSMPLDLERR','MPMEMALLOCERR',
-              'MPSOCKERR',  'MPUNDRFLOW', 'MPPRESETERR',
+    errors = ['MPSUCCESS', 'MPDRVERR', 'MPDLLBUSY',
+              'MPINVPARA', 'MPNOTCON', 'MPREADY',
+              'MPWPRETRIG', 'MPWTRIG', 'MPBUSY',
+              'MPNOACTCH', 'MPCOMERR', 'MPINVTYPE',
+              'MPNOTINNET', 'MPSMPLDLERR', 'MPMEMALLOCERR',
+              'MPSOCKERR', 'MPUNDRFLOW', 'MPPRESETERR',
               'MPPARSERERR']
 
-    error_codes = dict(enumerate(errors,1))
+    error_codes = dict(enumerate(errors, 1))
 
     try: e = error_codes[returncode]
     except: e = returncode
@@ -44,28 +45,38 @@ def get_returncode(returncode):
 class MP150(object):
     """
     Class to sample and record data from BioPac MP device
+
+    Parameters
+    ----------
+    logfile : str
+        Name of output file
+    samplerate : float
+    channels : array_like
     """
 
-    def __init__(self, logfile='default', samplerate=500., channels=[1,2]):
+    def __init__(self, logfile='default', samplerate=500.,
+                 channels=[1, 2]):
 
         self.logfile = logfile
         self.manager = mp.Manager()
-        if not isinstance(channels,(list,np.ndarray)): channels = [channels]
+        if not isinstance(channels, (list, np.ndarray)):
+            channels = [channels]
 
-        f = {'sampletime'   : 1000. / samplerate,
-             'newestsample' : np.zeros(len(channels)),
-             'newesttime'   : 0,
-             'pipe'         : None,
-             'record'       : False,
-             'connected'    : False,
-             'channels'     : np.array(channels)}
+        f = {'sampletime': 1000. / samplerate,
+             'newestsample': np.zeros(len(channels)),
+             'newesttime': 0,
+             'pipe': None,
+             'record': False,
+             'connected': False,
+             'channels': np.array(channels)}
 
         self.dic = self.manager.dict(f)
-
         self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
+        self.log_process = None
 
-        self.sample_process = mp.Process(target=mp150_sample,
+        self.sample_process = rp.Process(name='mp150_sample',
+                                         target=mp150_sample,
                                          args=(self.dic,
                                                self.sample_queue,
                                                self.log_queue))
@@ -87,12 +98,13 @@ class MP150(object):
         if self.dic['record']: self.stop_recording()
         self.dic['record'] = True
 
-        if run:
-            fname = "{0}-run{1}_MP150_data.csv".format(self.logfile,str(run))
+        if run is not None:
+            fname = "{0}-run{1}_MP150_data.csv".format(self.logfile, str(run))
         else:
             fname = "{0}_MP150_data.csv".format(self.logfile)
 
-        self.log_process = mp.Process(target=mp150_log,
+        self.log_process = rp.Process(name='mp150_log',
+                                      target=mp150_log,
                                       args=(fname,
                                             self.dic['channels'],
                                             self.log_queue))
@@ -106,8 +118,10 @@ class MP150(object):
 
         self.dic['record'] = False
 
-        self.log_queue.put('kill')
-        self.log_process.join()
+        if self.log_process is not None:
+            self.log_queue.put('kill')
+            self.log_process.join()
+            self.log_process = None
 
     @property
     def sample(self):
@@ -137,7 +151,7 @@ class MP150(object):
         self.sample_process.join()
 
 
-def mp150_log(fname,channels,log_queue):
+def mp150_log(fname, channels, log_queue):
     """
     Creates log file for physio data
 
@@ -145,54 +159,44 @@ def mp150_log(fname,channels,log_queue):
     ----------
     fname : str
         Name of log file to record sampled data to
-    channels : array-like
+    channels : array_like
         What channels data is being acquired for
-    log_queue : multiprocessing.manager.Queue()
-        To receive detected peaks/troughs from peak_finder() function
+    log_queue : multiprocessing.manager.Queue
+        To receive detected peaks/troughs from `peak_finder()` function
     """
 
     ch = ',channel'.join(str(y) for y in channels)
-    f = open(fname,'a+')
+    f = open(fname, 'a+')
     f.write('time,channel{0}\n'.format(ch))
     f.flush()
 
     while True:
         i = log_queue.get()
-        if i == 'kill': break
+        if isinstance(i, str) and i == 'kill': break
         sig = ','.join(str(y) for y in list(i[1]))
-        f.write('{0},{1}\n'.format(i[0],sig))
+        f.write('{0},{1}\n'.format(i[0], sig))
         f.flush()
 
     f.close()
 
 
-def mp150_sample(dic,sample_queue,log_queue):
+def mp150_sample(dic, sample_queue, log_queue):
     """
     Continuously samples data from the BioPac MP150
 
     Parameters
     ----------
-    dic : multiprocessing.manager.Dict()
-
-        Required input
-        --------------
+    dic : multiprocessing.manager.Dict
         dic['sampletime']: float, msec / sample
         dic['channels']: list , specify recording channels (e.g., [1,5,7])
-
-        Set by mp150_sample()
-        ---------------------
-        dic['newestsample']: array, most recently sampled data
-        dic['newesttime']: array, time of most recently sampled data
-
-        Optionally set
-        --------------
+        dic['newestsample']: array_like, most recently sampled data
+        dic['newesttime']: array_like, time of most recently sampled data
         dic['record']: boolean, save sampled data to log file
         dic['pipe']: list-of-int, send specified data channels to queue
-
-    sample_queue : multiprocessing.manager.Queue()
+    sample_queue : multiprocessing.manager.Queue
         Queue to send sampled data for use by another process
-    log_queue : multiprocessing.manager.Queue()
-        Queue to send sampled data to mp150_log() function
+    log_queue : multiprocessing.manager.Queue
+        Queue to send sampled data to `mp150_log()` function
 
     Methods
     -------
@@ -215,14 +219,13 @@ def mp150_sample(dic,sample_queue,log_queue):
         if not np.all(data == dic['newestsample']):
             dic['newestsample'], dic['newesttime'] = data.copy(), currtime
 
-            if dic['record']: log_queue.put([currtime,data])
-            
-            pipe_chan = dic['pipe']
-            if pipe_chan is not None:
-                try: sample_queue.put_nowait([currtime,data[pipe_chan]])
+            if dic['record']: log_queue.put([currtime, data])
+
+            pipe = dic['pipe']
+            if pipe is not None:
+                try: sample_queue.put_nowait([currtime, data[pipe]])
                 except mp.queues.Full: pass
 
-    sample_queue.put('kill')
     shutdown_mp150(mpdev)
 
 
@@ -232,19 +235,21 @@ def receive_data(dll, channels):
 
     Parameters
     ----------
-    dll : from ctypes.windll.LoadLibrary()
-    channels : array-like (1 x 16)
+    dll : from ctypes.windll.LoadLibrary
+    channels : (1 x 16) array_like
         Specify recording channels [on=1, off=0]
     """
 
     num_points, read = len(channels), DWORD(0)
-    data = [0]*num_points
+    data = [0] * num_points
     data = (c_double * len(data))(*data)
-    try: result = dll.receiveMPData(byref(data),DWORD(num_points),byref(read))
-    except: result = 0
+    try:
+        result = dll.receiveMPData(byref(data), DWORD(num_points), byref(read))
+    except:
+        result = 0
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to obtain a sample: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to obtain a sample: {}'.format(result))
 
     return np.array(tuple(data))
 
@@ -260,17 +265,17 @@ def shutdown_mp150(dll):
 
     # stop acquisition
     try: result = dll.stopAcquisition()
-    except: result = "failed to call stopAcquisition"
+    except: result = 'failed to call stopAcquisition'
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to close the connection: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to stop data acquisition: {}'.format(result))
 
     # close connection
     try: result = dll.disconnectMPDev()
-    except: result = "failed to call disconnectMPDev"
+    except: result = 'failed to call disconnectMPDev'
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to close the connection: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to disconnect from BioPac: {}'.format(result))
 
 
 def setup_mp150(dic):
@@ -282,63 +287,58 @@ def setup_mp150(dic):
 
     Parameters
     ----------
-    dic : multiprocessing.manager.Dict()
-
-        Required input
-        --------------
-        dic['sampletime']: specify sampling rate (in ms)
-        dic['channels']: specify recording channels
-
-        Set by mp150_sample()
-        ---------------------
+    dic : multiprocessing.manager.Dict
+        dic['sampletime']: float, specify sampling rate (in ms)
+        dic['channels']: list-of-int, specify recording channels
         dic['connected']: boolean, continue sampling or not
     """
 
     # load required library
     try: mpdev = windll.LoadLibrary('mpdev.dll')
     except:
-        f = os.path.join(os.path.dirname(os.path.abspath(__file__)),'mpdev.dll')
+        f = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'mpdev.dll')
         try: mpdev = windll.LoadLibrary(f)
-        except: raise Exception("Could not load mpdev.dll")
+        except: raise Exception('Could not load mpdev.dll')
 
     # connect to MP150
     try: result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
     except: result = 0
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to connect: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to connect to BioPac: {}'.format(result))
 
     # set sampling rate
     try: result = mpdev.setSampleRate(c_double(dic['sampletime']))
     except: result = 0
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to set samplerate: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to set samplerate: {}'.format(result))
 
     # set acquisition channels
-    chnls = [0]*16
-    for x in dic['channels']: chnls[x-1] = 1
+    chnls = [0] * 16
+    for x in dic['channels']: chnls[x - 1] = 1
     chnls = (c_int * len(chnls))(*chnls)
 
     try: result = mpdev.setAcqChannels(byref(chnls))
     except: result = 0
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to set channels to acquire: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to set channels to acquire: {}'.format(result))
 
     # start acquisition daemon
     try: result = mpdev.startMPAcqDaemon()
     except: result = 0
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to start acq daemon: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to start acq daemon: {}'.format(result))
 
     # start acquisition
     try: result = mpdev.startAcquisition()
     except: result = 0
     result = get_returncode(result)
-    if result != "MPSUCCESS":
-        raise Exception("Failed to start acquisition: {}".format(result))
+    if result != 'MPSUCCESS':
+        raise Exception('Failed to start data acquisition: {}'.format(result))
 
     dic['connected'] = True
 
