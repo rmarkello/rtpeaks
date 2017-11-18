@@ -1,16 +1,11 @@
-"""
-rtpeaks
-"""
-
-__all__ = ['keypress', 'mpdev', 'rtp', '__version__']
+__all__ = ['keypress', 'mpdev', 'rtp', 'info']
 
 import os
 import warnings
-from .version import __version__
+from rtpeaks.rtp import RTP
+from rtpeaks.mpdev import MP150
 
 if os.name == 'posix':
-    warnings.warn('Not on Windows operating system; most functionality will ' +
-                  'be inaccessible.')
-
-from .rtp import RTP
-from .mpdev import MP150
+    warnings.warn(
+        'Non-Windows system detected; most functionality will be inaccessible.'
+    )
