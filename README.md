@@ -1,5 +1,5 @@
 # rtpeaks
-For use in the real-time detection of physiological "peaks" using BioPac MP150
+For use in the real-time analysis (i.e., peak and trough detection) of physiological waveforms.
 
 ## Software Requirements
 * Windows (tested up through Win7)
@@ -7,84 +7,106 @@ For use in the real-time detection of physiological "peaks" using BioPac MP150
 * numpy
 * scipy
 
-Also, you'll need to purchase the Biopac Hardware API from [BioPac Systems](http://www.biopac.com/product/api-biopac-hardware/). The current version should provide Win8 and Win0 compatibility, but that functionality has not yet been tested.
+Also, you'll need to purchase and install the [BIOPAC Hardware API (BHAPI)](http://www.biopac.com/product/api-biopac-hardware/). The current version of the BHAPI should provide Win8 and Win10 compatibility, but that functionality has not yet been tested with `rtpeaks`.
 
 ## Hardware Requirements
-* BioPac MP150
-* At least one add-on module (e.g., [RSPEC](http://www.biopac.com/product/bionomadix-rsp-with-ecg-amplifier/))
+* BIOPAC MP150/MP160
+* At least one module for recording physiological data (e.g., [RSPEC](http://www.biopac.com/product/bionomadix-rsp-with-ecg-amplifier/))
 
-This is designed to work with the MP150 but could be tweaked to work with other BioPac systems (e.g., MP160, MP36R, MP35, MP36).
+`rtpeaks` is designed to work with the MP150/160 but could be tweaked to work with other BIOPAC systems (e.g., MP36R, MP35, MP36).
 
-## Usage (Real-time peak detection)
-Making sure you've got the BioPac system set up and plugged in to the computer.
+# Usage
+This section details a few use cases for `rtpeaks`. All examples assume you have the BIOPAC system set up and plugged in to the computer.
 
-First, import the relevant class and instantiate. Use the `logfile` kwarg to determine what the relevant outputs will be labelled as, `channels` to set the BioPac channels for recording, and `samplerate` to set the sampling rate.
+**WARNING**: Please note that while the code below is written as though the package is being run interactively, this is for demonstration purposes only. This package utilizes Python's `multiprocessing` module; as such, you should ensure that all code that uses this package is called within an `if __name__ == '__main__':` codeblock.
 
-```python
-from rtpeaks import RTP
+## Real-time peak detection
 
-pf = RTP(logfile='test', channels=[1,2], samplerate=1000.)
-```
 
-Next, initiate peak and trough detection. Be careful not to start this too soon as the class will imitate keypress (`p` for peaks and `t` for troughs) when you call this method.
-
-When calling `start_peak_finding()`, you should specify the channel that you want to use to detect peaks with the `channel` kwarg. Not all physiological signals are best sampled at high rates; for example, respiration is generally best sampled in the 50-100Hz range, while ECG is best sampled in the ~1000Hz range. If you want to detect peaks in respiration but simultaneously record ECG data at 1000Hz, you can provide the `samplerate` kwarg to this method, which will automatically downsample the incoming data. The optional kwarg `run` is used to differentiate output files (i.e., if you call this method multiple times in the same experiment, you can ensure that you have multiple output files rather than one large output file).
+First, import `rtpeaks` and create an instance of the `RTP` class.
 
 ```python
-pf.start_peak_finding(channel=1, samplerate=50, run=1)
+import rtpeaks
+
+pf = rtpeaks.RTP(logfile='test', channels=[1,2], samplerate=1000.)
 ```
 
-When you're done peak finding, you can call `stop_peak_finding()` to stop emulating the keypresses and recording data.
+Here, `logfile` indicates the name of the output file where our recorded data will be saved, `channels` indicates what BIOPAC channels to record from (these channels are set on the actual hardware and will vary by set up), and `samplerate` indicates the sampling rate at which to acquire data.
 
-Then calling `close()` will disconnect the program from the BioPac device. Only call that when you are totally done with your experiment!
+Next, we'll collect some baseline data. The program performs *much* better when we've given it some time to get used to the waveform that is being recorded and analyzed.
+
+
+```python
+pf.start_baseline(channel=1, samplerate=500.)
+time.sleep(60)  # or run some experimental code here
+pf.stop_baseline()
+```
+
+Since we can only actively analyze one physiological waveform at a time, we must specify that we are interested in `channel=1`. Data from channel 2 will still be recorded, just not analyzed! The `samplerate=500.` argument specifies that we would like to downsample the data from channel 1 to 500 Hz for our real-time analysis (it is still recorded at the samplerate set during instantiation of the class).
+
+Now that we have baseline data, we can initiate real-time peak and trough detection. Be careful not to start this too soon as the class imitates keypresses (`p` for peaks and `t` for troughs) when you call this method.
+
+```python
+pf.start_peak_finding(channel=1, samplerate=500., run=1)
+time.sleep(100)  # or run some experimental code here
+```
+
+As with baselining, we specify what channel and samplerate at which to *analyze* our data. We can also provide the optional `run` argument, which can be used to differentiate output files if you will be recording data from multiple experimental sessions.
+
+When we're all done with peak finding, we can stop it and disconnect from the BIOPAC.
 
 ```python
 pf.stop_peak_finding()
 pf.close()
 ```
 
-This program will create two (or more) files (depending on how many times you call `start_peak_finding()`). Assuming you ran the code snippets above:
+The call to `pf.close()` should only be done once you no longer need to communicate with the BIOPAC. If you intend to call `pf.start_peak_finding()` again, then you should hold off.
 
-1. A data file ('*_MP150_data.csv'), detailing 
+Now that we're done, the program will create two (or more) files (depending on how many times you call `start_peak_finding()` with a different `run` argument). Assuming you ran the code snippets above, you'll get two CSV files:
 
-   * Timestamp of each datapoint (relative to instantiation of class)
-   * Amplitude of recorded data channels
+1. A `test_run1_MP150_data.csv` file, including
+   * The timestamp of each acquired datapoint (relative to instantiation of the `RTP` class), and
+   * The amplitude of data from all recorded channels
 
-2. A peak file ('*_MP150_peaks.csv'), detailing 
-
-   * The time each peak/trough occurred,
+2. A `test_run1_MP150_peaks.csv` file, including
+   * The time each detected peak/trough occurred,
    * The amplitude of the peak/trough, and
-   * Whether it was a trough (0) or peak (1)
+   * Whether it was a peak (1) or trough (0)
 
 
-## Alternate Usage (Recording physiological data)
-You can also use this module to simply record from and interface with the BioPac, as opposed to doing real-time peak detection. In order to do that you should use the `MP150` class:
+## Recording physiological data
+You can also use `rtpeaks` to simply record from and interface with the BIUOPAC, as opposed to doing real-time physiological analysis. In order to do that you should use the `MP150` class:
 
 ```python
-from rtpeaks import MP150
+import rtpeaks
 
-physio = MP150(logfile='test', channels=[1,2], samplerate=1000)
+physio = rtpeaks.MP150(logfile='test', channels=[1,2], samplerate=1000)
 physio.start_recording(run=1)
 ```
 
-You can use the kwarg `run` to differentiate output if you have multiple experimental runs and you want a separate datafile for each. The resultant data file will be '*_MP150_data.csv' as described above. The timestamp in this file is relative to an internal clock (i.e., it is not `time.ctime()`). If you would like to sync up the physiological recordings with experimental events, the current timestamp of the internal clock is accessible as an attribute of the class instance:
+The arguments are the same as described above; note that `physio.start_recording()` does not require a `channel` or `samplerate` argument as in `.start_peak_finding()`, as we are simply recording data (not analyzing it).
+
+If you would like to access the physiological recordings during recording, the current timestamp of the internal clock and the most recently acquired data sample are accessible as attributes:
 
 ```python
 current_time = physio.timestamp
+current_sample = physio.sample
 ```
 
-When you're done, stop recording and close the connection to the BioPac:
+When you're done, stop recording and close the connection to the BIOPAC as before:
 
 ```python
 physio.stop_recording()
 physio.close()
 ```
 
-## Copyright & Disclaimers
+The above code snippet wil result in only ONE output file: `test_run1_MP150_data.csv`. Obviously, since we are not perform peak detection, there will be no `_peaks.csv` file.
 
-rtpeaks is distributed under Version 3 of the GNU Public License. For more details,
+# Copyright & Disclaimers
+
+`rtpeaks` is distributed under Version 3 of the GNU Public License. For more details,
 see LICENSE.
 
-BIOPAC is a trademark of BIOPAC Systems, Inc. The authors of this software have no 
-affiliation with BIOPAC Systems, Inc, and that company neither supports nor endorses 
+BIOPAC is a trademark of BIOPAC Systems, Inc. The authors of this software have no
+affiliation with BIOPAC Systems, Inc, and that company neither supports nor endorses
 this software package.
