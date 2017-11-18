@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from future.utils import raise_
 import multiprocessing as mp
 

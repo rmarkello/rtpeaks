@@ -1,13 +1,10 @@
-#!/usr/bin/env python
-
 from __future__ import print_function, division, absolute_import
 import os
 import os.path as op
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter as savgol
-if os.name != 'posix':
-    from rtpeaks.rtp import get_baseline, peak_or_trough, gen_thresh
+from rtpeaks.rtp import get_baseline, peak_or_trough, gen_thresh
 
 
 def test_rtp_finder(signal, dic, plot=False):
@@ -16,22 +13,20 @@ def test_rtp_finder(signal, dic, plot=False):
 
     Parameters
     ----------
-    signal : array (n x 2)
+    signal : (N x 2) array_like
     dic : dictionary
-
-        Required input
-        --------------
         dic['log'] : str, logfile name
         dic['samplerate'] : list, samplerates for each channel
         dic['baseline'] : bool, whether a baseline session was run
         dic['channelloc'] : int, location of test channel from baseline data
-
-    plot : bool
-        Whether to plot in real time w/threshold visualizations (WICKED SLOW)
+    plot : bool, optional
+        Whether to plot in real time w/threshold visualizations (WICKED SLOW).
+        Default: False
 
     Returns
     -------
-    array (n x 3) : detected peaks and troughs
+    (N x 3) np.ndarray
+        Detected peaks and troughs
     """
 
     detected = []
@@ -145,6 +140,8 @@ def test_rtp_finder(signal, dic, plot=False):
 
 
 def test_RTP(f, channelloc=0, samplerate=1000, plot=False, rtplot=False):
+    """
+    """
     fname = op.join(os.getcwd(), 'data', '{}-run1_MP150_data.csv'.format(f))
     signal = np.loadtxt(fname,
                         skiprows=1,
@@ -159,7 +156,6 @@ def test_RTP(f, channelloc=0, samplerate=1000, plot=False, rtplot=False):
     detected = test_rtp_finder(signal, dic, plot=rtplot)
 
     if plot:
-        import matplotlib.pyplot as plt
         pi, ti = detected[detected[:, 2] == 1], detected[detected[:, 2] == 0]
         fi = detected[detected[:, 2] == 2]
         inds = np.arange(0, signal.shape[0], 1000 / samplerate, dtype='int64')

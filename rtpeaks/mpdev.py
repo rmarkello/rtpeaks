@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Credit to @esdalmaijer for initial basis for code at:
 https://github.com/esdalmaijer/MPy150
@@ -9,8 +8,11 @@ from their initial repo
 """
 
 from __future__ import print_function, division, absolute_import
-from ctypes import windll, c_int, c_double, byref
-from ctypes.wintypes import DWORD
+try:
+    from ctypes import windll, c_int, c_double, byref
+    from ctypes.wintypes import DWORD
+except ImportError:
+    pass
 import multiprocessing as mp
 import os
 import numpy as np
@@ -19,12 +21,12 @@ import rtpeaks.process as rp
 
 def get_returncode(returncode):
     """
-    Checks return codes from BioPac device
+    Checks return codes from BIOPAC device
 
     Parameters
     ----------
     returncode : int
-        Code returned by call to BioPac mpdev.dll
+        Code returned by call to BIOPAC mpdev.dll
 
     Returns
     -------
@@ -39,9 +41,7 @@ def get_returncode(returncode):
               'MPNOTINNET', 'MPSMPLDLERR', 'MPMEMALLOCERR',
               'MPSOCKERR', 'MPUNDRFLOW', 'MPPRESETERR',
               'MPPARSERERR']
-
     error_codes = dict(enumerate(errors, 1))
-
     try: e = error_codes[returncode]
     except: e = returncode
 
@@ -50,19 +50,19 @@ def get_returncode(returncode):
 
 class MP150(object):
     """
-    Class to sample and record data from BioPac MP device
+    Class to sample and record data from BIOPAC MP device
 
     Parameters
     ----------
     logfile : str
         Name of output file
     samplerate : float, optional
-        Set sampling rate for physiological data from BioPac. Default: 500Hz
+        Set sampling rate for physiological data from BIOPAC. Default: 500Hz
     channels : int or array_like, optional
-        List of channels on BioPac device from which to record data. There
-        should be a maximum of 16 (this is the BioPac limit). Default: [1,2]
+        List of channels on BIOPAC device from which to record data. There
+        should be a maximum of 16 (this is the BIOPAC limit). Default: [1,2]
     dummy : bool, optional
-        Whether to run in dummy mode (i.e., don't try to connect to BioPac).
+        Whether to run in dummy mode (i.e., don't try to connect to BIOPAC).
         Default: False
     """
 
@@ -70,19 +70,20 @@ class MP150(object):
                  channels=[1, 2], dummy=False):
 
         self.logfile = logfile
-        self.manager = mp.Manager()
         if not isinstance(channels, (list, np.ndarray)):
             channels = [channels]
+        f = dict(
+            sampletime=(1000. / samplerate),
+            newestsample=np.zeros(len(channels)),
+            newesttime=0,
+            pipe=None,
+            record=False,
+            connected=False,
+            channels=np.array(channels)
+        )
 
-        f = {'sampletime': 1000. / samplerate,
-             'newestsample': np.zeros(len(channels)),
-             'newesttime': 0,
-             'pipe': None,
-             'record': False,
-             'connected': False,
-             'channels': np.array(channels)}
-
-        self.dic = self.manager.dict(f)
+        self.manager = mp.Manager()
+        self.dic = self.manager.dict(**f)
         self.sample_queue = self.manager.Queue()
         self.log_queue = self.manager.Queue()
         self.log_process = None
@@ -93,9 +94,13 @@ class MP150(object):
                                              args=(self.dic,
                                                    self.sample_queue,
                                                    self.log_queue))
-            self.sample_process.daemon = True
-            self.sample_process.start()
+        else:
+            self.sample_process = rp.Process(name='mp150_sample',
+                                             target=do_nothing)
+            self.dic['connected'] = True
 
+        self.sample_process.daemon = True
+        self.sample_process.start()
         while not self.dic['connected']: pass
 
     def start_recording(self, run=None):
@@ -108,7 +113,8 @@ class MP150(object):
             To differentiate name of output file
         """
 
-        if self.dic['record']: self.stop_recording()
+        if self.dic['record']:
+            self.stop_recording()
         self.dic['record'] = True
 
         if run is not None:
@@ -154,12 +160,14 @@ class MP150(object):
 
     def close(self):
         """
-        Closes connection with BioPac MP150
+        Closes connection with BIOPAC MP150
         """
 
         self.dic['connected'] = False
-        if self.dic['pipe'] is not None: self.dic['pipe'] = None
-        if self.dic['record']: self.stop_recording()
+        if self.dic['pipe'] is not None:
+            self.dic['pipe'] = None
+        if self.dic['record']:
+            self.stop_recording()
 
         self.sample_process.join()
 
@@ -179,23 +187,29 @@ def mp150_log(fname, channels, log_queue):
     """
 
     ch = ',channel'.join(str(y) for y in channels)
-    f = open(fname, 'a+')
-    f.write('time,channel{0}\n'.format(ch))
-    f.flush()
-
-    while True:
-        i = log_queue.get()
-        if isinstance(i, str) and i == 'kill': break
-        sig = ','.join(str(y) for y in list(i[1]))
-        f.write('{0},{1}\n'.format(i[0], sig))
+    with open(fname, 'a+') as f:
+        f.write('time,channel{0}\n'.format(ch))
         f.flush()
 
-    f.close()
+        while True:
+            i = log_queue.get()
+            if isinstance(i, str) and i == 'kill': break
+            sig = ','.join(str(y) for y in list(i[1]))
+            f.write('{0},{1}\n'.format(i[0], sig))
+            f.flush()
+
+
+def do_nothing():
+    """
+    Does nothing
+    """
+
+    pass
 
 
 def mp150_sample(dic, sample_queue, log_queue):
     """
-    Continuously samples data from the BioPac MP150
+    Continuously samples data from the BIOPAC MP150
 
     Parameters
     ----------
@@ -288,7 +302,7 @@ def shutdown_mp150(dll):
     except: result = 'failed to call disconnectMPDev'
     result = get_returncode(result)
     if result != 'MPSUCCESS':
-        raise Exception('Failed to disconnect from BioPac: {}'.format(result))
+        raise Exception('Failed to disconnect from BIOPAC: {}'.format(result))
 
 
 def setup_mp150(dic):
@@ -315,11 +329,15 @@ def setup_mp150(dic):
         except: raise Exception('Could not load mpdev.dll')
 
     # connect to MP150
-    try: result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
+    try: result = mpdev.connectMPDev(c_int(103), c_int(11), b'auto')
     except: result = 0
     result = get_returncode(result)
-    if result != 'MPSUCCESS':
-        raise Exception('Failed to connect to BioPac: {}'.format(result))
+    if result != "MPSUCCESS":
+        try: result = mpdev.connectMPDev(c_int(101), c_int(11), b'auto')
+        except: result = 0
+        result = get_returncode(result)
+        if result != "MPSUCCESS":
+            raise Exception("Failed to connect to BIOPAC: {}".format(result))
 
     # set sampling rate
     try: result = mpdev.setSampleRate(c_double(dic['sampletime']))
