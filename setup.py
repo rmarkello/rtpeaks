@@ -1,14 +1,30 @@
 #!/usr/bin/env python
 
-from setuptools import setup, find_packages
-from rtpeaks.version import __version__
+import os
 
-setup(
-    name='rtpeaks',
-    version=__version__,
-    description='Real-time peak detection with BioPac MP150',
-    maintainer='Ross Markello',
-    url='http://github.com/rmarkello/rtpeaks',
-    install_requires=['numpy','scipy'],
-    packages=find_packages(exclude=['setup','rtpeaks/tests']),
-    license='GNU3')
+
+def main():
+    from setuptools import setup, find_packages
+
+    # from nipype setup.py file
+    ldict = locals()
+    curr_path = os.path.dirname(__file__)
+    ver_file  = os.path.join(curr_path, 'rtpeaks', 'info.py')
+    with open(ver_file) as infofile:
+        exec(infofile.read(), globals(), ldict)
+
+    setup(
+        name=ldict['NAME'],
+        version=ldict['VERSION'],
+        description=ldict['DESCRIPTION'],
+        maintainer=ldict['MAINTAINER'],
+        download_url=ldict['DOWNLOAD_URL'],
+        install_requires=ldict['INSTALL_REQUIRES'],
+        packages=find_packages(exclude=['rtpeaks/tests']),
+        package_data=ldict['PACKAGE_DATA'],
+        tests_require=ldict['TESTS_REQUIRE'],
+        license=ldict['LICENSE'])
+
+
+if __name__ == '__main__':
+    main()

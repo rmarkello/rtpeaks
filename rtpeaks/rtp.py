@@ -1,225 +1,59 @@
-#!/usr/bin/env python
-
 from __future__ import print_function, division, absolute_import
+import itertools
+import Queue
+import time
 import numpy as np
-import rtpeaks.keypress as keypress
-from rtpeaks.mpdev import MP150
+from rtpeaks.keypress import press_key
+from rtpeaks.mpdev import BIOPAC
 import rtpeaks.process as rp
+from rtpeaks.utils import (peak_or_trough, gen_thresh)
 
 
-class RTP(MP150):
+
+def rtp_log(fname, que):
     """
-    Class for use in real-time detection of peaks and troughs
-
-    Inherits from MP150 class (see: `libmpdev.py`). If you only want to record
-    BioPac MP150 data, probably best to use that class instead.
+    Creates log file to record detected peaks/troughs
 
     Parameters
     ----------
-    logfile : str
-        Name of logfile (prepended to "_MP150_data.csv")
-    samplerate : float
-        Samplerate to record from BioPac
-    channels : int or list
-        Channels to record from BioPac
-    debug : bool
-        Whether to run in debug mode. Will print statements rather than
-        imitating keypresses
-
-    Methods
-    -------
-    start_baseline(), stop_baseline()
-        Runs a baseline measurement -- highly recommended!!
-    start_peak_finding(), stop_peak_finding()
-        Detects peaks/troughs in specified physiological data
-
-    Usage
-    -----
-    Instantiate class and call `start_peak_finding()` method. Upon peak/trough
-    detection, class will simulate `p` or `t` keypress. After calling
-    `stop_peak_finding()` must call `close()` method to disconnect from BioPac.
-
-    Notes
-    -----
-    Should _NOT_ be used interactively.
-    """
-
-    def __init__(self, logfile='default', samplerate=200,
-                 channels=[1, 2], debug=False):
-        # check inputs
-        if not isinstance(samplerate, (float, int)):
-            raise TypeError('Samplerate must be one of [int, float]'')
-        if not isinstance(channels, (list, np.ndarray)):
-            if isinstance(channels, (int)): channels = [channels]
-            else: raise TypeError('Channels must be one of [list, array, int]')
-
-        super(RTP, self).__init__(logfile, samplerate, channels)
-
-        self.dic['baseline'] = False
-        self.dic['samplerate'] = samplerate
-        self.dic['debug'] = debug
-        self.dic['log'] = logfile
-        self.peak_log_process = None
-
-        self.peak_queue = self.manager.Queue()
-        self.peak_process = rp.Process(name='rtp_finder',
-                                       target=rtp_finder,
-                                       args=(self.dic,
-                                             self.sample_queue,
-                                             self.peak_queue))
-        self.peak_process.daemon = True
-        self.peak_process.start()
-
-    def start_peak_finding(self, channel=None, samplerate=None, run=None):
-        """
-        Begin peak finding process and start logging data
-
-        Parameters
-        ----------
-        channel : int
-            Channel for peak finding; must be one of channels set at
-            instantiation.
-        samplerate : float
-            Samplerate at which `channel` should be searched for peaks/troughs.
-            Will appropriately downsample data, if desired.
-        run : str
-            To differentiate name of output file
-        """
-
-        if not self.dic['baseline']:
-            print('RTP hasn\'t been baselined! Proceeding anyways, but note' +
-                  'that peak finding quality will likely be erratic.')
-
-        # set peak finding channel
-        if isinstance(channel, (list, np.ndarray)): channel = channel[0]
-        elif isinstance(channel, int): pass
-        else: channel = self.dic['channels'][0]
-
-        # set peak finding sample rate
-        if isinstance(samplerate, (int, float)):
-            self.dic['samplerate'] = samplerate
-
-        # turn off peak finding if it's currently happening
-        if self.dic['pipe'] is not None: self.stop_peak_finding()
-
-        # start recording and turn peak finding back on
-        self.start_recording(run=run)
-        self.dic['pipe'] = np.where(self.dic['channels'] == channel)[0][0]
-
-        # start peak logging process
-        if run is not None:
-            fname = '{}-run{}_MP150_peaks.csv'.format(self.logfile, str(run))
-        else:
-            fname = '{}_MP150_peaks.csv'.format(self.logfile)
-
-        self.peak_log_process = rp.Process(name='rtp_log',
-                                           target=rtp_log,
-                                           args=(fname, self.peak_queue))
-        self.peak_log_process.daemon = True
-        self.peak_log_process.start()
-
-    def stop_peak_finding(self):
-        """
-        Stops peak finding process (and stops data recording)
-        """
-
-        # turn off pipe and stop recording
-        self.dic['pipe'] = None
-        self.stop_recording()
-
-        # ensure peak logging process quits successfully
-        if self.peak_log_process is not None:
-            self.peak_queue.put('kill')
-            self.peak_log_process.join()
-            self.peak_log_process = None
-
-    def start_baseline(self, channel, samplerate):
-        """
-        Creates a baseline data file
-
-        Baseline data file will be used by rtp_finder to generate starter
-        thresholds for peak detection. The longer this is run the better the
-        estimates will be for actual peak detection.
-
-        Parameters
-        ----------
-        channel : int
-            Channel that peak finding will occur on
-        samplerate : float
-            Samplerate at which to search data for peaks/troughs
-        """
-
-        self.start_recording(run='_baseline')
-        self.base_chan = np.where(self.dic['channels'] == channel)[0][0]
-        self.base_rate = samplerate
-
-    def stop_baseline(self):
-        """
-        Stops recording baseline.
-
-        This causes rtp_finder() to progress and process baseline data file to
-        "seed" peak detection.
-        """
-
-        self.stop_recording()
-        self.dic['baseline'] = True
-        self.sample_queue.put([self.base_chan, self.base_rate])
-
-    def close(self):
-        """
-        Stops peak finding (if ongoing) and cleanly disconnects from BioPac
-        """
-
-        self.stop_peak_finding()
-        self.sample_queue.put('kill')
-        self.peak_process.join()
-
-        super(RTP, self).close()
-
-
-def rtp_log(log, que):
-    """
-    Creates log file for detected peaks & troughs
-
-    Parameters
-    ----------
-    log : str
-        Name for log file output
+    fname : str
+        Name of log file to record sampled data
     que : multiprocessing.manager.Queue
-        To receive detected peaks/troughs from peak_finder() function
+        Queue to receive detected peaks/troughs from `rtp_finder()` function
     """
 
-    f = open(log, 'a+')
-    f.write('time,amplitude,peak\n')
-    f.flush()
-
-    while True:
-        i = que.get()
-        if isinstance(i, str) and i == 'kill': break
-        f.write("{0}\n".format(','.join(str(y) for y in list(i))))
+    with open(fname, 'a+') as f:
+        f.write('time,amplitude,peak\n')
         f.flush()
 
-    f.close()
+        while True:
+            i = que.get()
+            if isinstance(i, str) and i == 'kill': break
+            out = '{0}\n'.format(','.join(str(y) for y in list(i)))
+            f.write(out)
+            f.flush()
 
 
-def get_baseline(log, channel_loc, samplerate):
+def get_baseline(logfile, channel, samplerate):
     """
     Gets baseline estimates of physiological waveform
 
-    Will only be run if rtp.start_baseline()/stop_baseline() has been used;
-    this function will import the baseline data and attempt to do a cursory
-    peak finding on it. The data from the peak finding will be used to seed
-    initial parameters of real-time detection, including vanishing thresholds
+    Will only be run if `start_baseline()`/`stop_baseline()` have been used.
+    This function will import the baseline data and attempt to do cursory peak
+    detection on it. The data from the peak detection will be used to seed
+    initial parameters for real-time detection, including vanishing thresholds
     and lookback values.
 
     Parameters
     ----------
-    log : str
+    logfile : str
         RTP.logfile
-    channel_loc : int
-        Channel that peak finding is supposed to occur on
+    channel : int
+        Channel for peak finding; must be channel used in call to
+        `start_baseline()`
     samplerate : int
-        dic['samplerate']
+        Sampling rate at which `channel` data should be searched for peaks/
+        troughs.
 
     Returns
     -------
@@ -230,14 +64,14 @@ def get_baseline(log, channel_loc, samplerate):
     try:
         from peakdet import PeakFinder
     except ImportError:
-        print('Can\'t load peakdet; ignoring baseline data.'')
+        print('Can\'t load peakdet; ignoring baseline data.')
         return
 
-    data = np.loadtxt('{0}-run_baseline_MP150_data.csv'.format(log),
+    data = np.loadtxt('{0}-run_baseline_biopac_data.csv'.format(logfile),
                       skiprows=1,
                       delimiter=',',
-                      usecols=[0, channel_loc + 1])
-    fs = 1000. / np.mean(np.diff(data[:, 0]))  # sampling rate of MP150
+                      usecols=[0, channel + 1])
+    fs = 1000. / np.mean(np.diff(data[:, 0]))  # sampling rate of BIOPAC
 
     # downsample data if necessary
     if samplerate < fs:
@@ -263,21 +97,27 @@ def get_baseline(log, channel_loc, samplerate):
     return out
 
 
-def rtp_finder(dic, sample_queue, peak_queue):
+def rtp_finder(dic, sample_queue, peak_queue, debug=False):
     """
-    Detects peaks/troughs in real time from BioPac MP150 data
+    Detects peaks/troughs in real time from BIOPAC data
 
     Parameters
     ----------
     dic : multiprocessing.manager.Dict
-        dic['samplerate'] : list, samplerates for each channel
-        dic['debug'] : bool, whether to print debug statements
-        dic['baseline'] : bool, whether a baseline session was run
-        dic['log'] : str, name of logfile (required if dic['baseline'])
+        samplerate : list
+            Sampling rate
+        baseline : bool, optional
+            Whether a baseline session was run. Default: False
+        log : str,
+            name of logfile (required if dic['baseline'])
     sample_queue : multiprocessing.manager.Queue
-        Queue for receiving data from the BioPac MP150
+        Queue for receiving sampled data (i.e., from `biopac_sample()`)
     peak_queue : multiprocessing.manager.Queue
-        Queue to send detected peak information to peak_log() function
+        Queue to send detected peaks/troughs from `rtp_log()` function
+    debug : bool, optional
+        Whether to run in debug mode. This will cause the function to print
+        updates (e.g., 'Found peak/trough') rather than imitating keypresses.
+        Default: False
 
     Returns
     -------
@@ -285,8 +125,6 @@ def rtp_finder(dic, sample_queue, peak_queue):
     """
 
     # this will block until an item is available in sample_queue
-    # i.e., dic['pipe'] is set
-    # or, if we've gotten baseline, this will be that!
     sig = sample_queue.get()
     if isinstance(sig, str) and sig == 'kill': return
     else: sig = np.atleast_2d(np.array(sig))
@@ -335,11 +173,11 @@ def rtp_finder(dic, sample_queue, peak_queue):
             # if extrema was detected "immediately" (i.e., within 2 datapoints
             # of real-time) then log detection.
             if ex == len(sig) - 2:
-                if dic['debug']:
+                if debug:
                     print('Found {}'.format('peak' if l else 'trough'))
                     peak_queue.put(np.append(sig[-1], [l, dic['newesttime']]))
                 else:
-                    keypress.PressKey(0x50 if l else 0x54)
+                    press_key('p' if l else 't')
                     peak_queue.put(np.append(sig[-1], [l]))
 
             # reset sig
@@ -356,171 +194,227 @@ def rtp_finder(dic, sample_queue, peak_queue):
             thresh = gen_thresh(last_found[:-1])
 
 
-def peak_or_trough(signal, last_found, thresh, fs):
+def dummy_keypress(dic, sample_queue, debug=False):
     """
-    Helper function for rtp_finder()
-
-    Determines if any peaks or troughs are detected in `signal` that
-    meet threshold generated via `gen_thresh()`
+    Simulates peak/trough detection by making random keypresses
 
     Parameters
     ----------
-    signal : (N x 2) array_like
-        Time, physio data since last detection
-    last_found : (N x 3) array_like
-        Class, time, and height of previously detected peaks/troughs
-    thresholds : (2 x 2) array_like
-        Average (c1) and std (c2) thresholds for time (r1) and height (r2)
-    fs : float
-        Sampling rate
-
-    Returns
-    -------
-    bool
-        Whether a peak was detected
-    bool
-        Whether a trough was detected
+    dic : multiprocessing.manager.Dict
+        pipe : int
+            Determines when to simulate keypresses (i.e., this is set by calls
+            to `RTP.start_peak_finding()` and `RTP.stop_peak_finding()`)
+    sample_queue : multiprocessing.manager.Queue
+        Queue for receiving kill signal by call to `RTP.close()`
+    debug : bool, optional
+        Whether to run in debug mode. This will cause the function to print
+        updates (e.g., 'Found peak/trough') rather than imitating keypresses.
+        Default: False
     """
 
-    # if time since last det > upper bound of normal time interval
-    # shrink height threshold by relative factor
-    divide = ((signal[-1, 0] - last_found[-1, 1]) /
-              (thresh[0, 0] + thresh[0, 1]))
-    divide = divide if divide > 1 else 1
+    cycle = itertools.cycle(['p', 't'])
 
-    tdiff = thresh[0, 0] - thresh[0, 1]
-    hdiff = (thresh[1, 0] - thresh[1, 1]) / divide
+    while True:
+        try: i = sample_queue.get_nowait()
+        except Queue.Empty: i = None
+        if isinstance(i, str) and i == 'kill': return
 
-    # approximate # of samples between detections
-    avgrate = int(np.floor(tdiff / fs))
-    if avgrate < 0: avgrate = 5  # if negative, let's just look 5 back
+        if dic['pipe'] is None: continue
 
-    if last_found[-1, 0] != 1:  # if we're looking for a peak
-        peaks = get_extrema(signal[:, 1])
-        if len(peaks) > 0:
-            p = peaks[-1]
-            # ensure peak is higher than previous `avgrate` datapoints
-            max_ = np.all(signal[p, 1] >= signal[p - avgrate:p, 1])
-            sh = signal[p, 1] - last_found[-1, 2]
-            rh = signal[p, 0] - last_found[-1, 1]
-
-            if sh > hdiff and rh > tdiff and max_:
-                return p, None
-
-    if last_found[-1, 0] != 0:  # if we're looking for a trough
-        troughs = get_extrema(signal[:, 1], peaks=False)
-        if len(troughs) > 0:
-            t = troughs[-1]
-            # ensure trough is lower than previous `avgrate` datapoints
-            min_ = np.all(signal[t, 1] <= signal[t - avgrate:t, 1])
-            sh = signal[t, 1] - last_found[-1, 2]
-            rh = signal[t, 0] - last_found[-1, 1]
-
-            if sh < -hdiff and rh > tdiff and min_:
-                return None, t
-
-    return None, None
+        time.sleep(np.random.randint(5))
+        key = cycle.next()
+        if debug and dic['pipe'] is not None:
+            print('Found {}'.format('peak' if key == 'p' else 'trough'))
+        elif dic['pipe'] is not None:
+            press_key(key)
 
 
-def gen_thresh(last_found):
+class RTP(BIOPAC):
     """
-    Helper function for peak_or_trough()
+    Class for use in real-time peak/trough detection of BIOPAC data
 
-    Determines relevant threshold for peak/trough detection based on previously
-    detected peaks/troughs
+    Inherits from `BIOPAC`. If you only want to record data from the BIOPAC
+    it's probably best to use that class instead.
 
     Parameters
     ----------
-    last_found : (N x 3) array_like
-        Class, time, and height of previously detected peaks/troughs
+    logfile : str
+        Name of output file to which data is saved. This parameter will be
+        prepended to '_biopac_data.csv'.
+    channels : int or array_like
+        List of channels on BIOPAC device from which to record data. There
+        should be no more than sixteen (the limit set by BIOPAC), and they
+        should correspond to the physical switches set on the BIOPAC device.
+    samplerate : float, optional
+        Sampling rate at which to record from BIOPAC in samples/second (Hz).
+        Default: 500
+    debug : bool, optional
+        Whether to run in debug mode. If using peak-finding functionality this
+        will cause the class to print updates (e.g., 'Found peak/trough')
+        rather than imitating keypresses. Default: False
+    dummy : bool, optional
+        Whether to run in dummy mode. This is for testing purposes only. The
+        program will not connect to the BIOPAC and no data will be recorded.
+        All other functionality should be accessible. Default: False
 
-    Returns
+    Methods
     -------
-    (2 x 2) np.ndarray
-        [[avg time, std time], [avg height, std height]]
+    start_baseline(), stop_baseline()
+        Start/stop a baseline measurement -- *highly* recommended for accurate
+        peak/trough detection
+    start_peak_finding(), stop_peak_finding()
+        Stop/start real-time peak/trough detection
+
+    Usage
+    -----
+    Instantiate class and call `start_peak_finding()` method. Upon peak/trough
+    detection, class will simulate `p` (peak) or `t` (trough) keypress. After
+    calling `stop_peak_finding()` must call `close()` method to disconnect from
+    BIOPAC.
+
+    Notes
+    -----
+    Should not be used interactively.
     """
 
-    output = np.zeros((2, 2))
-    for col in [1, 2]:
-        peaks = last_found[last_found[:, 0] == 1, col]
-        troughs = last_found[last_found[:, 0] == 0, col]
+    def __init__(self, logfile, channels, samplerate=500,
+                 debug=False, dummy=False):
+        super(RTP, self).__init__(logfile, channels,
+                                  samplerate=samplerate, dummy=dummy)
+        self.debug = debug
+        self.dic['baseline'] = False
+        self.peak_log_process = None
+        self.peak_queue = self.manager.Queue()
 
-        if peaks.size != troughs.size:
-            size = np.min([peaks.size, troughs.size])
-            dist = peaks[-size:] - troughs[-size:]
+        if not self.dummy:
+            self.peak_process = rp.Process(name='rtp_finder',
+                                           target=rtp_finder,
+                                           args=(self.dic,
+                                                 self.sample_queue,
+                                                 self.peak_queue,
+                                                 self.debug))
         else:
-            dist = peaks - troughs
+            self.peak_process = rp.Process(name='rtp_finder',
+                                           target=dummy_keypress,
+                                           args=(self.dic,
+                                                 self.sample_queue,
+                                                 self.debug))
 
-        # get rid of gross outliers (likely caused by pauses in peak finding)
-        inds = np.where(np.logical_and(dist <= dist.mean() + dist.std() * 3,
-                                       dist >= dist.mean() - dist.std() * 3))
-        dist = dist[inds[0]]
+        self.peak_process.daemon = True
+        self.peak_process.start()
 
-        weights = np.linspace(1, 10, dist.size)  # weighting
+    def start_peak_finding(self, channel=None, samplerate=None, run=None):
+        """
+        Begin peak finding process and start logging data
 
-        thresh = np.average(dist, weights=weights)  # weighted avg
-        if last_found.shape[0] > 20:
-            variance = np.average((dist - thresh)**2,
-                                  weights=weights) * dist.size
-            stdev = np.sqrt(variance / (dist.size - 1)) * 2.5  # unbiased std
+        Parameters
+        ----------
+        channel : int
+            Channel for peak finding; must be one of channels set at
+            self.channels.
+        samplerate : float
+            Samplerate at which `channel` should be searched for peaks/troughs.
+            Will appropriately downsample data, if desired.
+        run : str, optional
+            Will add 'runX' to logfile name; useful for differentiating ouptuts
+            of experimental sessions. Default: None
+        """
+
+        if not self.dic['baseline'] and not self.dummy:
+            print('RTP hasn\'t been baselined! Proceeding anyways, but note' +
+                  ' that peak finding quality will likely be erratic.')
+
+        # set peak finding channel
+        if isinstance(channel, (list, np.ndarray)):
+            channel = channel[0]
+        elif isinstance(channel, int):
+            pass
         else:
-            stdev = thresh / 2
-        output[col - 1] = [np.abs(thresh), stdev]
+            channel = self.dic['channels'][0]
 
-    return output
+        # set peak finding sample rate
+        if isinstance(samplerate, (int, float)):
+            self.dic['samplerate'] = samplerate
 
+        # turn off peak finding if it's currently happening
+        if self.dic['pipe'] is not None:
+            self.stop_peak_finding()
 
-def get_extrema(data, peaks=True, thresh=0):
-    """
-    Find extrema in `data` by changes in sign of first derivative
+        # start recording and turn peak finding back on
+        self.start_recording(run=run)
+        self.dic['pipe'] = np.argwhere(self.dic['channels'] ==
+                                       channel).squeeze()
 
-    Parameters
-    ----------
-    data : array_like
-    peaks : bool
-        Whether to look for peaks (True) or troughs (False)
-    thresh : float [0,1]
+        # start peak logging process
+        if run is not None:
+            fname = '{0}-run{1}_biopac_peaks.csv'.format(self.logfile,
+                                                         str(run))
+        else:
+            fname = '{0}_biopac_peaks.csv'.format(self.logfile)
 
-    Returns
-    -------
-    np.ndarray
-        Indices of extrema from `data`
-    """
+        self.peak_log_process = rp.Process(name='rtp_log',
+                                           target=rtp_log,
+                                           args=(fname,
+                                                 self.peak_queue))
+        self.peak_log_process.daemon = True
+        self.peak_log_process.start()
 
-    if thresh < 0 or thresh > 1: raise ValueError('Thresh must be in (0,1).')
+    def stop_peak_finding(self):
+        """
+        Stops peak finding process (and stops data recording)
+        """
 
-    data = normalize(data)
+        # turn off pipe and stop recording
+        self.dic['pipe'] = None
+        self.stop_recording()
 
-    if peaks: Indx = np.where(data > data.max() * thresh)[0]
-    else: Indx = np.where(data < data.min() * thresh)[0]
+        # ensure peak logging process quits successfully
+        if self.peak_log_process is not None:
+            self.peak_queue.put('kill')
+            self.peak_log_process.join()
+            self.peak_log_process = None
 
-    trend = np.sign(np.diff(data))
-    idx = np.where(trend == 0)[0]
+    def start_baseline(self, channel, samplerate):
+        """
+        Creates a baseline data file
 
-    # get only peaks, and fix flat peaks
-    for i in range(idx.size - 1, -1, -1):
-        if trend[min(idx[i] + 1, trend.size) - 1] >= 0: trend[idx[i]] = 1
-        else: trend[idx[i]] = -1
+        Baseline data file will be used by `rtp_finder()` to generate starter
+        thresholds for peak detection. The longer this is run the better the
+        estimates will be for actual peak detection.
 
-    if peaks: idx = np.where(np.diff(trend) == -2)[0] + 1
-    else: idx = np.where(np.diff(trend) == 2)[0] + 1
+        Parameters
+        ----------
+        channel : int
+            Channel for peak finding; must be one of channels set at
+            self.channels.
+        samplerate : float
+            Samplerate at which `channel` should be searched for peaks/troughs.
+            Will appropriately downsample data, if desired.
+        """
 
-    return np.intersect1d(Indx, idx)
+        self.start_recording(run='_baseline')
+        self.base_chan = np.where(self.dic['channels'] == channel)[0][0]
+        self.base_rate = samplerate
 
+    def stop_baseline(self):
+        """
+        Stops recording baseline.
 
-def normalize(data):
-    """
-    Normalizes `data` (subtracts mean and divides by std)
+        This causes `rtp_finder()` to progress and process baseline data file
+        to generate start thresholds for peak detection.
+        """
 
-    Parameters
-    ----------
-    data : array_like
+        self.stop_recording()
+        self.dic['baseline'] = True
+        self.sample_queue.put([self.base_chan, self.base_rate])
 
-    Returns
-    -------
-    np.ndarray
-        Normalized data
-    """
+    def close(self):
+        """
+        Stops peak finding (if ongoing) and disconnects from BIOPAC
+        """
 
-    if data.size == 1 or data.std() == 0: return data - data.mean(0)
-    else: return (data - data.mean(0)) / data.std(0)
+        self.stop_peak_finding()
+        self.sample_queue.put('kill')
+        self.peak_process.join()
+
+        super(RTP, self).close()
