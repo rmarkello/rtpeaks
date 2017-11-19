@@ -21,8 +21,6 @@ This section details a few use cases for `rtpeaks`. All examples assume you have
 **WARNING**: Please note that while the code below is written as though the package is being run interactively, this is for demonstration purposes only. This package utilizes Python's `multiprocessing` module; as such, you should ensure that all code that uses this package is called within an `if __name__ == '__main__':` codeblock.
 
 ## Real-time peak detection
-
-
 First, import `rtpeaks` and create an instance of the `RTP` class.
 
 ```python
@@ -64,23 +62,22 @@ The call to `pf.close()` should only be done once you no longer need to communic
 
 Now that we're done, the program will create two (or more) files (depending on how many times you call `start_peak_finding()` with a different `run` argument). Assuming you ran the code snippets above, you'll get two CSV files:
 
-1. A `test_run1_MP150_data.csv` file, including
+1. A `test_run1_biopac_data.csv` file, including
    * The timestamp of each acquired datapoint (relative to instantiation of the `RTP` class), and
    * The amplitude of data from all recorded channels
 
-2. A `test_run1_MP150_peaks.csv` file, including
+2. A `test_run1_biopac_peaks.csv` file, including
    * The time each detected peak/trough occurred,
    * The amplitude of the peak/trough, and
    * Whether it was a peak (1) or trough (0)
 
-
 ## Recording physiological data
-You can also use `rtpeaks` to simply record from and interface with the BIUOPAC, as opposed to doing real-time physiological analysis. In order to do that you should use the `MP150` class:
+You can also use `rtpeaks` to simply record from and interface with the BIUOPAC, as opposed to doing real-time physiological analysis. In order to do that you should use the `BIOPAC` class:
 
 ```python
 import rtpeaks
 
-physio = rtpeaks.MP150(logfile='test', channels=[1,2], samplerate=1000)
+physio = rtpeaks.BIOPAC(logfile='test', channels=[1,2], samplerate=1000)
 physio.start_recording(run=1)
 ```
 
@@ -100,10 +97,9 @@ physio.stop_recording()
 physio.close()
 ```
 
-The above code snippet wil result in only ONE output file: `test_run1_MP150_data.csv`. Obviously, since we are not perform peak detection, there will be no `_peaks.csv` file.
+The above code snippet wil result in only ONE output file: `test_run1_biopac_data.csv`. Obviously, since we are not perform peak detection, there will be no `_peaks.csv` file.
 
 # Copyright & Disclaimers
-
 `rtpeaks` is distributed under Version 3 of the GNU Public License. For more details,
 see LICENSE.
 

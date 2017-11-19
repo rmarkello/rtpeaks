@@ -142,7 +142,7 @@ def test_rtp_finder(signal, dic, plot=False):
 def test_RTP(f, channelloc=0, samplerate=1000, plot=False, rtplot=False):
     """
     """
-    fname = op.join(os.getcwd(), 'data', '{}-run1_MP150_data.csv'.format(f))
+    fname = op.join(os.getcwd(), 'data', '{}-run1_biopac_data.csv'.format(f))
     signal = np.loadtxt(fname,
                         skiprows=1,
                         usecols=[0, channelloc + 1],
