@@ -33,7 +33,6 @@ Here, `logfile` indicates the name of the output file where our recorded data wi
 
 Next, we'll collect some baseline data. The program performs *much* better when we've given it some time to get used to the waveform that is being recorded and analyzed.
 
-
 ```python
 pf.start_baseline(channel=1, samplerate=500.)
 time.sleep(60)  # or run some experimental code here

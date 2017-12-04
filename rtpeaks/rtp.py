@@ -9,7 +9,6 @@ import rtpeaks.process as rp
 from rtpeaks.utils import (peak_or_trough, gen_thresh)
 
 
-
 def rtp_log(fname, que):
     """
     Creates log file to record detected peaks/troughs
@@ -152,14 +151,15 @@ def rtp_finder(dic, sample_queue, peak_queue, debug=False):
         if i[0] < sig[-1, 0] + st: continue
 
         sig = np.vstack((sig, i))
-        peak, trough = peak_or_trough(sig, last_found, thresh, st)
+        detected = peak_or_trough(sig, last_found, thresh, st)
 
-        if peak is not None or trough is not None:
+        if np.any(detected):
             # get index of extrema
-            ex, l = peak or trough, int(bool(peak))
+            extrema, peak = np.any(detected), int(bool(detected[0]))
 
             # add to last_found and reload thresholds
-            last_found = np.vstack((last_found, np.append([l], sig[ex])))
+            last_found = np.vstack((last_found,
+                                    np.append([peak], sig[extrema])))
             # if we didn't baseline and have gotten some peaks/troughs
             # fix the last_found array so as not to have starter datapoints
             if (not dic['baseline'] and len(last_found) > 7 and
@@ -172,13 +172,18 @@ def rtp_finder(dic, sample_queue, peak_queue, debug=False):
 
             # if extrema was detected "immediately" (i.e., within 2 datapoints
             # of real-time) then log detection.
-            if ex == len(sig) - 2:
+            if extrema == len(sig) - 2:
                 if debug:
-                    print('Found {}'.format('peak' if l else 'trough'))
-                    peak_queue.put(np.append(sig[-1], [l, dic['newesttime']]))
+                    print('Found {}'.format('peak' if peak else 'trough'))
+                    peak_queue.put(np.append(sig[-1],
+                                             [peak, dic['newesttime']]))
                 else:
-                    press_key('p' if l else 't')
-                    peak_queue.put(np.append(sig[-1], [l]))
+                    press_key('p' if peak else 't')
+                    peak_queue.put(np.append(sig[-1], [peak]))
+
+            # add detected peak time to dic['peaks'] for use in .rate
+            if peak:
+                dic['peaks'] = dic['peaks'].append(sig[extrema, 0])
 
             # reset sig
             sig = np.atleast_2d(sig[-1])
@@ -265,6 +270,11 @@ class RTP(BIOPAC):
     start_peak_finding(), stop_peak_finding()
         Stop/start real-time peak/trough detection
 
+    Attributes
+    ----------
+    rate : float
+        Average rate of peaks detected over last 5 sec in units (peaks / sec)
+
     Usage
     -----
     Instantiate class and call `start_peak_finding()` method. Upon peak/trough
@@ -283,6 +293,7 @@ class RTP(BIOPAC):
                                   samplerate=samplerate, dummy=dummy)
         self.debug = debug
         self.dic['baseline'] = False
+        self.dic['peaks'] = np.empty(0, dtype='float')
         self.peak_log_process = None
         self.peak_queue = self.manager.Queue()
 
@@ -360,9 +371,7 @@ class RTP(BIOPAC):
         self.peak_log_process.start()
 
     def stop_peak_finding(self):
-        """
-        Stops peak finding process (and stops data recording)
-        """
+        """Stops peak finding process (and stops data recording)"""
 
         # turn off pipe and stop recording
         self.dic['pipe'] = None
@@ -409,12 +418,18 @@ class RTP(BIOPAC):
         self.sample_queue.put([self.base_chan, self.base_rate])
 
     def close(self):
-        """
-        Stops peak finding (if ongoing) and disconnects from BIOPAC
-        """
+        """Stops peak finding (if ongoing) and disconnects from BIOPAC"""
 
         self.stop_peak_finding()
         self.sample_queue.put('kill')
         self.peak_process.join()
 
         super(RTP, self).close()
+
+    @property
+    def rate(self):
+        """Returns average rate of peaks over last 5 sec (peaks / sec)"""
+
+        curr_time = self.dic['newesttime']
+        rate = self.dic['peaks'][self.dic['peaks'] > (curr_time - 5000.)]
+        return 60. / (np.diff(rate).mean() / 1000.)

@@ -290,7 +290,7 @@ class BIOPAC(object):
     ----------
     sample : np.ndarray
         Most recently acquired data from BIOPAC device. Length of array will
-        depend on how many channels are acquiring.
+        depend on how many channels are set at instantiation.
     timestamp : int
         Timestamp of most recently acquired data from BIOPAC device. Timestamp
         is relative to instantiation of class (i.e., it is NOT analagous to
@@ -367,8 +367,8 @@ class BIOPAC(object):
         self.log_process.start()
 
     def stop_recording(self):
-        """Halts logging/recording of sampled data
-        """
+        """Halts logging/recording of sampled data"""
+
         self.dic['record'] = False
         if self.log_process is not None:
             self.log_queue.put('kill')
@@ -377,19 +377,19 @@ class BIOPAC(object):
 
     @property
     def sample(self):
-        """Most recently sampled data
-        """
+        """Most recently sampled data"""
+
         return self.dic['newestsample']
 
     @property
     def timestamp(self):
-        """Timestamp of most recently sampled data
-        """
+        """Timestamp of most recently sampled data"""
+
         return self.dic['newesttime']
 
     def close(self):
-        """Closes connection with BIOPAC. Should only be called once.
-        """
+        """Closes connection with BIOPAC. Should only be called once."""
+
         self.dic['connected'] = False
         if self.dic['pipe'] is not None:
             self.dic['pipe'] = None
