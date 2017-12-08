@@ -428,8 +428,10 @@ class RTP(BIOPAC):
 
     @property
     def rate(self):
-        """Returns average rate of peaks over last 5 sec (peaks / sec)"""
+        """Returns average rate of peaks in last 5 sec (units: peaks / sec)"""
 
         curr_time = self.dic['newesttime']
-        rate = self.dic['peaks'][self.dic['peaks'] > (curr_time - 5000.)]
+        peaks = self.dic['peaks'][self.dic['peaks'] > (curr_time - 5000.)]
+        rate = np.diff(peaks)
+        if rate.size == 0: return
         return 60. / (np.diff(rate).mean() / 1000.)
