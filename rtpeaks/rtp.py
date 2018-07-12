@@ -183,7 +183,7 @@ def rtp_finder(dic, sample_queue, peak_queue, debug=False):
 
             # add detected peak time to dic['peaks'] for use in .rate
             if peak:
-                dic['peaks'] = dic['peaks'].append(sig[extrema, 0])
+                dic['peaks'] = np.append(dic['peaks'], sig[extrema, 0])
 
             # reset sig
             sig = np.atleast_2d(sig[-1])
